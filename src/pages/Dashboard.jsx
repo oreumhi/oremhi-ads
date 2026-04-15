@@ -465,9 +465,9 @@ export default function Dashboard({ data, allowedBrands }) {
 }
 
 // 스타일 상수
-const th = { padding: '9px 12px', textAlign: 'left', fontSize: 11, color: '#8890a6', fontWeight: 700, borderBottom: '1px solid #282d40' };
+const th = { padding: '9px 12px', textAlign: 'left', fontSize: 11, color: '#8890a6', fontWeight: 700, borderBottom: '1px solid #282d40', whiteSpace: 'nowrap' };
 const thR = { ...th, textAlign: 'right' };
 const thC = { ...th, textAlign: 'center' };
-const tdR = { padding: '8px 12px', borderBottom: '1px solid #282d40', fontSize: 12.5, textAlign: 'right' };
-const tdC = { padding: '6px 8px', borderBottom: '1px solid #282d40', textAlign: 'center' };
+const tdR = { padding: '8px 12px', borderBottom: '1px solid #282d40', fontSize: 12.5, textAlign: 'right', whiteSpace: 'nowrap' };
+const tdC = { padding: '6px 8px', borderBottom: '1px solid #282d40', textAlign: 'center', whiteSpace: 'nowrap' };
 const numInp = { background: '#1a1e2c', border: '1px solid #282d40', borderRadius: 6, padding: '4px 8px', color: '#e4e7ed', fontSize: 12, outline: 'none', width: 80, textAlign: 'right' };
