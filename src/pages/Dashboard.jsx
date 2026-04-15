@@ -40,7 +40,9 @@ export default function Dashboard({ data }) {
       const mapping = mapByKey[row.match_key];
       if (!mapping) { unmapped.push(row); return; }
 
-      const { brand, product, ad_type, label } = mapping;
+      const { brand, product, ad_type: rawAdType, label } = mapping;
+      // GFA는 종류 구분 없이 하나로 합침
+      const ad_type = rawAdType.startsWith('GFA') ? 'GFA' : rawAdType;
 
       if (!brands[brand]) brands[brand] = {};
       if (!brands[brand][product]) brands[brand][product] = {};
