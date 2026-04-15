@@ -1,5 +1,6 @@
 // ============================================
 // 스파크라인 차트 컴포넌트
+// 수정: 0%일 때 흰색(회색) 표시
 // ============================================
 
 import React from 'react';
@@ -20,11 +21,14 @@ export function Sparkline({ data, color = '#5b8def', width = 110, height = 28 })
     return `${x},${y}`;
   }).join(' ');
 
-  // 추세 계산 (첫 값 vs 마지막 값)
   const first = vals[0] || 0;
   const last = vals[vals.length - 1] || 0;
   const trend = first > 0 ? ((last - first) / first * 100) : 0;
-  const trendColor = trend >= 0 ? '#3dd9a0' : '#f07070';
+  const trendPct = Math.abs(trend).toFixed(0);
+
+  // 0%면 회색, 양수면 초록, 음수면 빨강
+  const trendColor = Number(trendPct) === 0 ? '#8890a6' : (trend > 0 ? '#3dd9a0' : '#f07070');
+  const arrow = Number(trendPct) === 0 ? '' : (trend > 0 ? '▲' : '▼');
 
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -42,7 +46,7 @@ export function Sparkline({ data, color = '#5b8def', width = 110, height = 28 })
         fontSize: 10, fontWeight: 600, color: trendColor,
         minWidth: 32, textAlign: 'right',
       }}>
-        {trend >= 0 ? '▲' : '▼'}{Math.abs(trend).toFixed(0)}%
+        {arrow}{trendPct}%
       </span>
     </div>
   );

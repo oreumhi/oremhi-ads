@@ -1,18 +1,13 @@
 // ============================================
 // 대시보드 - 모든 브랜드/제품/광고 펼쳐보기
 //
-// 구조:
-//   브랜드 A
-//     제품 1
-//       파워링크
-//         그룹A  | 지표 | 추이
-//         그룹B  | 지표 | 추이
-//         ▶ 파워링크 합계
-//       쇼핑검색
-//         ...
-//       ▶▶ 제품 전체 합계
-//     제품 2 ...
-//   브랜드 B ...
+// 수정사항:
+//   1. 브랜드 선택 필터 (전체 또는 특정 브랜드만)
+//   2. 그래프 순서: 노출→클릭→클릭률→전환→광고비→매출→ROAS
+//   3. 0% 흰색 표시 (Sparkline 컴포넌트에서 처리)
+//   4. 합계만 기본 표시, 클릭 시 상세 펼침
+//   5. 하단 요약에 전환당비용(CPA) 추가
+//   6. 비밀번호 잠금 (App.jsx에서 처리)
 // ============================================
 
 import React, { useState, useMemo } from 'react';
@@ -23,27 +18,27 @@ import { Sparkline } from '../components/Sparkline';
 export default function Dashboard({ data }) {
   const { adData, mappings } = data;
   const [range, setRange] = useState(7);
+  const [selectedBrand, setSelectedBrand] = useState('전체');  // #1 브랜드 필터
+  const [expanded, setExpanded] = useState({});                 // #4 펼침 상태
+
+  // 펼침/접힘 토글
+  const toggleExpand = (key) => {
+    setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // ─── 데이터 구조화 ───
   const structured = useMemo(() => {
-    // 매핑을 match_key로 인덱싱
     const mapByKey = {};
     mappings.forEach(m => { mapByKey[m.match_key] = m; });
 
-    // 기간 필터 적용
     const filtered = filterByRange(adData, range);
 
-    // 브랜드 > 제품 > 광고유형 > 개별항목 구조 생성
     const brands = {};
     const unmapped = [];
 
     filtered.forEach(row => {
       const mapping = mapByKey[row.match_key];
-
-      if (!mapping) {
-        unmapped.push(row);
-        return;
-      }
+      if (!mapping) { unmapped.push(row); return; }
 
       const { brand, product, ad_type, label } = mapping;
 
@@ -57,7 +52,6 @@ export default function Dashboard({ data }) {
           rows: [],
         };
       }
-
       brands[brand][product][ad_type][row.match_key].rows.push(row);
     });
 
@@ -65,7 +59,7 @@ export default function Dashboard({ data }) {
   }, [adData, mappings, range]);
 
   // ─── 지표 행 렌더 ───
-  function MetricRow({ label, items, color, isSubtotal, isTotal, S }) {
+  function MetricRow({ label, items, color, isSubtotal, isTotal, onClick, clickable }) {
     const metrics = sumMetrics(items);
     const daily = aggregateByDate(items);
     const ctr = calcCtr(metrics.clicks, metrics.impressions);
@@ -77,8 +71,9 @@ export default function Dashboard({ data }) {
     const prefix = isTotal ? '▶▶ ' : isSubtotal ? '▶ ' : '';
 
     return (
-      <tr style={{ background: bg }}>
+      <tr style={{ background: bg, cursor: clickable ? 'pointer' : 'default' }} onClick={onClick || undefined}>
         <td style={{ padding: '8px 12px', borderBottom: `1px solid ${C.bd}`, fontSize: 12.5, fontWeight: fw, color: isTotal ? C.tx : isSubtotal ? C.txd : C.tx }}>
+          {clickable && <span style={{ fontSize: 10, marginRight: 4, color: C.txm }}>▼</span>}
           {prefix}{label}
         </td>
         <td style={tdR}>{fmtNum(metrics.impressions)}</td>
@@ -88,18 +83,19 @@ export default function Dashboard({ data }) {
         <td style={{ ...tdR, color: C.ok, fontWeight: 700 }}>{metrics.conversions}</td>
         <td style={{ ...tdR, color: cpa > 20000 ? C.no : cpa > 10000 ? C.warn : C.ok }}>{cpa > 0 ? fmtWon(cpa) : '-'}</td>
         <td style={{ ...tdR, color: Number(roas) >= 300 ? C.ok : Number(roas) < 100 ? C.no : C.tx }}>{roas}%</td>
+        {/* 그래프 순서: 노출 → 클릭 → 클릭률 → 전환 → 광고비 → 매출 → ROAS  (#2 수정) */}
         <td style={tdC}><Sparkline data={daily.map(d => d.impressions)} color={C.cyan} /></td>
         <td style={tdC}><Sparkline data={daily.map(d => d.clicks)} color={C.ac} /></td>
         <td style={tdC}><Sparkline data={daily.map(d => d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0)} color={C.yel} /></td>
-        <td style={tdC}><Sparkline data={daily.map(d => d.cost)} color={C.warn} /></td>
         <td style={tdC}><Sparkline data={daily.map(d => d.conversions)} color={C.ok} /></td>
+        <td style={tdC}><Sparkline data={daily.map(d => d.cost)} color={C.warn} /></td>
         <td style={tdC}><Sparkline data={daily.map(d => d.conv_revenue)} color={C.pink} /></td>
         <td style={tdC}><Sparkline data={daily.map(d => d.cost > 0 ? (d.conv_revenue / d.cost) * 100 : 0)} color={C.pur} /></td>
       </tr>
     );
   }
 
-  // 테이블 헤더
+  // 테이블 헤더 (#2 순서 수정)
   const Header = () => (
     <thead>
       <tr style={{ background: C.sf2 }}>
@@ -114,15 +110,17 @@ export default function Dashboard({ data }) {
         <th style={thC}>노출 추이</th>
         <th style={thC}>클릭 추이</th>
         <th style={thC}>클릭률 추이</th>
-        <th style={thC}>광고비 추이</th>
         <th style={thC}>전환 추이</th>
+        <th style={thC}>광고비 추이</th>
         <th style={thC}>매출 추이</th>
         <th style={thC}>ROAS 추이</th>
       </tr>
     </thead>
   );
 
-  const brandNames = Object.keys(structured.brands).sort();
+  const allBrandNames = Object.keys(structured.brands).sort();
+  // #1 브랜드 필터 적용
+  const brandNames = selectedBrand === '전체' ? allBrandNames : allBrandNames.filter(b => b === selectedBrand);
   const brandColors = ['#5b8def', '#3dd9a0', '#f5a445', '#ed6ea0', '#9d7ff0', '#45c8dc', '#f0c746'];
 
   const hasData = adData.length > 0;
@@ -130,8 +128,8 @@ export default function Dashboard({ data }) {
 
   return (
     <div>
-      {/* 헤더 + 기간 선택 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+      {/* 헤더 + 브랜드 선택 + 기간 선택 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>광고 성과 대시보드</h2>
           <div style={{ fontSize: 12, color: C.txd, marginTop: 2 }}>모든 브랜드 · 모든 제품 · 모든 광고 한눈에</div>
@@ -149,6 +147,39 @@ export default function Dashboard({ data }) {
           ))}
         </div>
       </div>
+
+      {/* #1 브랜드 선택 버튼 */}
+      {allBrandNames.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setSelectedBrand('전체')}
+            style={{
+              padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              fontSize: 13, fontWeight: selectedBrand === '전체' ? 700 : 400,
+              background: selectedBrand === '전체' ? C.ac : C.sf,
+              color: selectedBrand === '전체' ? '#fff' : C.txd,
+              border: `1px solid ${selectedBrand === '전체' ? C.ac : C.bd}`,
+            }}
+          >
+            전체
+          </button>
+          {allBrandNames.map((b, i) => (
+            <button
+              key={b}
+              onClick={() => setSelectedBrand(b)}
+              style={{
+                padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: selectedBrand === b ? 700 : 400,
+                background: selectedBrand === b ? brandColors[i % brandColors.length] + '22' : C.sf,
+                color: selectedBrand === b ? brandColors[i % brandColors.length] : C.txd,
+                border: `1px solid ${selectedBrand === b ? brandColors[i % brandColors.length] + '55' : C.bd}`,
+              }}
+            >
+              {b}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 데이터 없을 때 */}
       {!hasData && (
@@ -172,7 +203,7 @@ export default function Dashboard({ data }) {
       {brandNames.map((brandName, bi) => {
         const products = structured.brands[brandName];
         const productNames = Object.keys(products).sort();
-        const bColor = brandColors[bi % brandColors.length];
+        const bColor = brandColors[allBrandNames.indexOf(brandName) % brandColors.length];
 
         return (
           <div key={brandName} style={{ marginBottom: 24 }}>
@@ -193,14 +224,12 @@ export default function Dashboard({ data }) {
             {/* 제품별 */}
             {productNames.map(productName => {
               const adTypes = products[productName];
-              // 광고유형 정렬
               const sortedAdTypes = Object.keys(adTypes).sort((a, b) => {
                 const ai = AD_TYPE_ORDER.indexOf(a);
                 const bii = AD_TYPE_ORDER.indexOf(b);
                 return (ai === -1 ? 99 : ai) - (bii === -1 ? 99 : bii);
               });
 
-              // 제품 전체 데이터 (합계용)
               const allProductRows = sortedAdTypes.flatMap(at =>
                 Object.values(adTypes[at]).flatMap(item => item.rows)
               );
@@ -226,34 +255,58 @@ export default function Dashboard({ data }) {
                           const matchKeys = Object.keys(items);
                           const allRows = matchKeys.flatMap(k => items[k].rows);
                           const atColor = AD_TYPE_COLORS[adType] || C.txd;
+                          const expandKey = `${brandName}||${productName}||${adType}`;
+                          const isExpanded = expanded[expandKey] || false;
+                          const hasMultiple = matchKeys.length > 1;
 
                           return (
                             <React.Fragment key={adType}>
-                              {/* 개별 항목 */}
-                              {matchKeys.map(mk => (
-                                <MetricRow
-                                  key={mk}
-                                  label={
-                                    <span>
-                                      <span style={{ color: atColor, fontSize: 11, marginRight: 6 }}>
-                                        [{adType}]
+                              {/* #4 합계를 먼저 표시 (클릭하면 상세 펼침) */}
+                              {hasMultiple ? (
+                                <>
+                                  {/* 광고유형 합계 행 (항상 보임, 클릭 가능) */}
+                                  <MetricRow
+                                    label={`${adType} 합계`}
+                                    items={allRows}
+                                    color={atColor}
+                                    isSubtotal
+                                    clickable
+                                    onClick={() => toggleExpand(expandKey)}
+                                  />
+                                  {/* 개별 항목 (펼쳐졌을 때만 보임) */}
+                                  {isExpanded && matchKeys.map(mk => (
+                                    <MetricRow
+                                      key={mk}
+                                      label={
+                                        <span>
+                                          <span style={{ color: atColor, fontSize: 11, marginRight: 6 }}>
+                                            [{adType}]
+                                          </span>
+                                          {items[mk].label}
+                                        </span>
+                                      }
+                                      items={items[mk].rows}
+                                      color={atColor}
+                                    />
+                                  ))}
+                                </>
+                              ) : (
+                                /* 항목이 1개뿐이면 합계 없이 바로 표시 */
+                                matchKeys.map(mk => (
+                                  <MetricRow
+                                    key={mk}
+                                    label={
+                                      <span>
+                                        <span style={{ color: atColor, fontSize: 11, marginRight: 6 }}>
+                                          [{adType}]
+                                        </span>
+                                        {items[mk].label}
                                       </span>
-                                      {items[mk].label}
-                                    </span>
-                                  }
-                                  items={items[mk].rows}
-                                  color={atColor}
-                                />
-                              ))}
-
-                              {/* 광고유형 소계 (2개 이상일 때) */}
-                              {matchKeys.length > 1 && (
-                                <MetricRow
-                                  label={`${adType} 합계`}
-                                  items={allRows}
-                                  color={atColor}
-                                  isSubtotal
-                                />
+                                    }
+                                    items={items[mk].rows}
+                                    color={atColor}
+                                  />
+                                ))
                               )}
                             </React.Fragment>
                           );
@@ -290,20 +343,29 @@ export default function Dashboard({ data }) {
         </div>
       )}
 
-      {/* 하단 전체 요약 */}
+      {/* #5 하단 전체 요약 (전환당비용 추가) */}
       {hasData && hasMappings && (
         <div style={{
           background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginTop: 16,
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 14,
         }}>
           {(() => {
-            const all = filterByRange(adData, range);
+            // 선택된 브랜드에 해당하는 데이터만 합산
+            const mapByKey = {};
+            mappings.forEach(m => { mapByKey[m.match_key] = m; });
+            const all = filterByRange(adData, range).filter(row => {
+              if (selectedBrand === '전체') return mapByKey[row.match_key];
+              const mapping = mapByKey[row.match_key];
+              return mapping && mapping.brand === selectedBrand;
+            });
             const m = sumMetrics(all);
+            const cpa = m.conversions > 0 ? Math.round(m.cost / m.conversions) : 0;
             return [
               { label: '총 광고비', value: fmtWon(m.cost), color: C.warn },
               { label: '총 노출수', value: fmtNum(m.impressions), color: C.cyan },
               { label: '총 클릭수', value: fmtNum(m.clicks), color: C.ac },
               { label: '총 전환수', value: fmt(m.conversions), color: C.ok },
+              { label: '전환당비용', value: cpa > 0 ? fmtWon(cpa) : '-', color: cpa > 20000 ? C.no : cpa > 10000 ? C.warn : C.ok },
               { label: '평균 ROAS', value: calcRoas(m.conv_revenue, m.cost) + '%', color: Number(calcRoas(m.conv_revenue, m.cost)) >= 300 ? C.ok : C.no },
             ].map(s => (
               <div key={s.label} style={{ textAlign: 'center' }}>

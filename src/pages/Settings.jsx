@@ -1,19 +1,41 @@
 // ============================================
-// 설정 페이지
+// 설정 페이지 - 비밀번호 관리 추가 (#6)
 // ============================================
 
 import React, { useState } from 'react';
 import { C } from '../config';
-import { fmt } from '../utils';
+import { fmt, hashPin } from '../utils';
+import { saveSettings } from '../store';
 
-export default function Settings({ data, clearAdData }) {
+export default function Settings({ data, clearAdData, settings, setSettings }) {
   const [msg, setMsg] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
 
   const handleClear = async () => {
     if (!confirm('⚠️ 모든 광고 데이터를 삭제합니다.\n매핑 설정은 유지됩니다.\n계속하시겠습니까?')) return;
     if (!confirm('정말로 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) return;
     await clearAdData();
     setMsg('✅ 광고 데이터가 삭제되었습니다.');
+  };
+
+  // 비밀번호 설정
+  const setPassword = async () => {
+    if (pin.length < 4) return setMsg('❌ 비밀번호는 4자리 이상이어야 합니다');
+    if (pin !== pinConfirm) return setMsg('❌ 비밀번호가 일치하지 않습니다');
+    const hash = await hashPin(pin);
+    await saveSettings({ pin_hash: hash });
+    if (setSettings) setSettings(prev => ({ ...prev, pin_hash: hash }));
+    setPin(''); setPinConfirm('');
+    setMsg('✅ 비밀번호가 설정되었습니다');
+  };
+
+  // 비밀번호 해제
+  const removePassword = async () => {
+    if (!confirm('비밀번호를 해제하시겠습니까?')) return;
+    await saveSettings({ pin_hash: null });
+    if (setSettings) setSettings(prev => ({ ...prev, pin_hash: null }));
+    setMsg('✅ 비밀번호가 해제되었습니다');
   };
 
   // 데이터 통계
@@ -58,6 +80,28 @@ export default function Settings({ data, clearAdData }) {
         </div>
       </div>
 
+      {/* 비밀번호 잠금 (#6) */}
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>🔒 비밀번호 잠금</div>
+        {settings?.pin_hash ? (
+          <div>
+            <div style={{ color: C.ok, marginBottom: 10 }}>✅ 비밀번호가 설정되어 있습니다</div>
+            <button onClick={removePassword} style={{ background: C.no, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+              비밀번호 해제
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 12, color: C.txd, marginBottom: 10 }}>비밀번호를 설정하면 앱 접속 시 비밀번호를 입력해야 합니다</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input style={inp} type="password" placeholder="비밀번호 (4자리 이상)" value={pin} onChange={e => setPin(e.target.value)} />
+              <input style={inp} type="password" placeholder="비밀번호 확인" value={pinConfirm} onChange={e => setPinConfirm(e.target.value)} />
+              <button onClick={setPassword} style={{ background: C.ac, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontWeight: 600, fontSize: 14 }}>설정</button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* 데이터 초기화 */}
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>🗑️ 데이터 초기화</div>
@@ -96,3 +140,4 @@ export default function Settings({ data, clearAdData }) {
 
 const card = { background: '#131620', border: '1px solid #282d40', borderRadius: 14, padding: 20, marginBottom: 14 };
 const stat = { padding: 12, background: '#1a1e2c', borderRadius: 8 };
+const inp = { background: '#1a1e2c', border: '1px solid #282d40', borderRadius: 8, padding: '10px 14px', color: '#e4e7ed', fontSize: 14, outline: 'none', width: 180, boxSizing: 'border-box' };
