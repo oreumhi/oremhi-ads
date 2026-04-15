@@ -15,16 +15,35 @@ import Papa from 'papaparse';
 import { parseNaverDate, uid } from './utils';
 import { classifySearchAdType, classifyGfaAdType, makeMatchKey, labelFromMatchKey } from './config';
 
-// ─── CSV 파일 읽기 (공통) ───
+// ─── CSV 파일 읽기 (인코딩 자동 감지) ───
 function readCsv(file) {
   return new Promise((resolve, reject) => {
-    Papa.parse(file, {
-      header: false,      // 헤더를 수동으로 처리
-      skipEmptyLines: true,
-      encoding: 'UTF-8',
-      complete: (result) => resolve(result.data),
-      error: (err) => reject(new Error('CSV 파싱 실패: ' + err.message)),
-    });
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const buffer = e.target.result;
+
+      // 1차: UTF-8로 시도
+      let text = new TextDecoder('utf-8').decode(buffer);
+
+      // 한글 깨짐 감지: UTF-8로 읽었을 때 캠페인유형/광고 등의 키워드가 없으면 EUC-KR로 재시도
+      if (!text.includes('캠페인') && !text.includes('광고') && !text.includes('노출')) {
+        try {
+          text = new TextDecoder('euc-kr').decode(buffer);
+        } catch { /* UTF-8 유지 */ }
+      }
+
+      // BOM 제거
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+      Papa.parse(text, {
+        header: false,
+        skipEmptyLines: true,
+        complete: (result) => resolve(result.data),
+        error: (err) => reject(new Error('CSV 파싱 실패: ' + err.message)),
+      });
+    };
+    reader.onerror = () => reject(new Error('파일 읽기 실패'));
+    reader.readAsArrayBuffer(file);
   });
 }
 
