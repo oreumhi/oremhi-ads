@@ -15,7 +15,7 @@ import { C, RANGES, AD_TYPE_ORDER, AD_TYPE_COLORS } from '../config';
 import { fmt, fmtWon, fmtNum, filterByRange, aggregateByDate, sumMetrics, calcCtr, calcCpa, calcRoas } from '../utils';
 import { Sparkline } from '../components/Sparkline';
 
-export default function Dashboard({ data }) {
+export default function Dashboard({ data, allowedBrands }) {
   const { adData, mappings } = data;
   const [range, setRange] = useState(7);
   const [selectedBrand, setSelectedBrand] = useState('전체');  // #1 브랜드 필터
@@ -120,7 +120,9 @@ export default function Dashboard({ data }) {
     </thead>
   );
 
-  const allBrandNames = Object.keys(structured.brands).sort();
+  const rawBrandNames = Object.keys(structured.brands).sort();
+  // allowedBrands: null = 전체, 배열 = 해당 브랜드만
+  const allBrandNames = allowedBrands ? rawBrandNames.filter(b => allowedBrands.includes(b)) : rawBrandNames;
   // #1 브랜드 필터 적용
   const brandNames = selectedBrand === '전체' ? allBrandNames : allBrandNames.filter(b => b === selectedBrand);
   const brandColors = ['#5b8def', '#3dd9a0', '#f5a445', '#ed6ea0', '#9d7ff0', '#45c8dc', '#f0c746'];
@@ -356,9 +358,13 @@ export default function Dashboard({ data }) {
             const mapByKey = {};
             mappings.forEach(m => { mapByKey[m.match_key] = m; });
             const all = filterByRange(adData, range).filter(row => {
-              if (selectedBrand === '전체') return mapByKey[row.match_key];
               const mapping = mapByKey[row.match_key];
-              return mapping && mapping.brand === selectedBrand;
+              if (!mapping) return false;
+              // allowedBrands 필터
+              if (allowedBrands && !allowedBrands.includes(mapping.brand)) return false;
+              // selectedBrand 필터
+              if (selectedBrand !== '전체' && mapping.brand !== selectedBrand) return false;
+              return true;
             });
             const m = sumMetrics(all);
             const cpa = m.conversions > 0 ? Math.round(m.cost / m.conversions) : 0;

@@ -2,7 +2,7 @@
 // 데이터 저장소
 //
 // Supabase 연결되면 클라우드 저장, 안되면 localStorage 사용.
-// ad_data는 upsert로 중복 방지 (같은 날짜+같은 match_key면 덮어쓰기).
+// v2: 다중 사용자 + 공유 링크 지원
 // ============================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -69,12 +69,10 @@ async function updateItem(table, id, updates) {
 }
 
 // ─── 광고 데이터 일괄 업로드 (upsert) ───
-// 같은 (date, match_key)가 있으면 덮어쓰기, 없으면 새로 추가
 export async function upsertAdData(items) {
   if (!items || items.length === 0) return { inserted: 0, updated: 0 };
 
   if (sb) {
-    // Supabase: upsert 사용
     const { data, error } = await sb
       .from('ad_data')
       .upsert(items, { onConflict: 'date,match_key', ignoreDuplicates: false })
@@ -82,13 +80,10 @@ export async function upsertAdData(items) {
 
     if (error) {
       console.error('[ad_data] upsert:', error.message);
-      // unique constraint 에러면 개별 upsert 시도
       if (error.message.includes('duplicate') || error.message.includes('unique')) {
-        let inserted = 0, updated = 0;
+        let inserted = 0;
         for (const item of items) {
-          const { error: e2 } = await sb
-            .from('ad_data')
-            .upsert(item, { onConflict: 'date,match_key' });
+          const { error: e2 } = await sb.from('ad_data').upsert(item, { onConflict: 'date,match_key' });
           if (!e2) inserted++;
         }
         return { inserted, updated: 0 };
@@ -98,55 +93,141 @@ export async function upsertAdData(items) {
     return { inserted: data?.length || items.length, updated: 0 };
   }
 
-  // localStorage
   try {
     const existing = JSON.parse(localStorage.getItem('oha_ad_data') || '[]');
     const existingMap = new Map();
-    existing.forEach(item => {
-      existingMap.set(`${item.date}||${item.match_key}`, item);
-    });
+    existing.forEach(item => { existingMap.set(`${item.date}||${item.match_key}`, item); });
 
     let inserted = 0, updated = 0;
     items.forEach(item => {
-      const key = `${item.date}||${item.match_key}`;
-      if (existingMap.has(key)) {
-        existingMap.set(key, { ...existingMap.get(key), ...item });
-        updated++;
-      } else {
-        existingMap.set(key, { ...item, created_at: new Date().toISOString() });
-        inserted++;
-      }
+      const k = `${item.date}||${item.match_key}`;
+      if (existingMap.has(k)) { existingMap.set(k, { ...existingMap.get(k), ...item }); updated++; }
+      else { existingMap.set(k, { ...item, created_at: new Date().toISOString() }); inserted++; }
     });
 
     localStorage.setItem('oha_ad_data', JSON.stringify(Array.from(existingMap.values())));
     return { inserted, updated };
-  } catch (e) {
-    return { inserted: 0, updated: 0, error: e.message };
-  }
+  } catch (e) { return { inserted: 0, updated: 0, error: e.message }; }
 }
 
-// ─── 매핑 삭제 (match_key 기준) ───
+// ─── 매핑 삭제 ───
 export async function deleteMappingByKey(matchKey) {
   if (sb) {
     const { error } = await sb.from('mappings').delete().eq('match_key', matchKey);
     return !error;
   }
   try {
-    const items = JSON.parse(localStorage.getItem('oha_mappings') || '[]')
-      .filter(i => i.match_key !== matchKey);
+    const items = JSON.parse(localStorage.getItem('oha_mappings') || '[]').filter(i => i.match_key !== matchKey);
     localStorage.setItem('oha_mappings', JSON.stringify(items));
     return true;
   } catch { return false; }
 }
 
-// ─── 설정 로드/저장 ───
+// ═══════════════════════════════════════════
+// 사용자 관리 (v2)
+// ═══════════════════════════════════════════
+
+export async function fetchUsers() {
+  return await fetchAll('users');
+}
+
+export async function createUser(user) {
+  const item = { ...user, id: uid() };
+  return await insertItem('users', item);
+}
+
+export async function deleteUser(id) {
+  return await deleteItem('users', id);
+}
+
+export async function updateUser(id, updates) {
+  return await updateItem('users', id, updates);
+}
+
+// 로그인: username + password_hash로 사용자 찾기
+export async function authenticateUser(username, passwordHash) {
+  if (sb) {
+    const { data, error } = await sb
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .eq('password_hash', passwordHash)
+      .single();
+    if (error || !data) return null;
+    return data;
+  }
+  try {
+    const users = JSON.parse(localStorage.getItem('oha_users') || '[]');
+    return users.find(u => u.username === username && u.password_hash === passwordHash) || null;
+  } catch { return null; }
+}
+
+// ═══════════════════════════════════════════
+// 공유 링크 관리 (v2)
+// ═══════════════════════════════════════════
+
+export async function fetchShareLinks() {
+  return await fetchAll('share_links');
+}
+
+export async function createShareLink(link) {
+  const item = { ...link, id: uid() };
+  return await insertItem('share_links', item);
+}
+
+export async function deleteShareLink(id) {
+  return await deleteItem('share_links', id);
+}
+
+// 공유 링크 인증: code + password_hash로 찾기
+export async function authenticateShareLink(code, passwordHash) {
+  if (sb) {
+    const { data, error } = await sb
+      .from('share_links')
+      .select('*')
+      .eq('code', code)
+      .eq('password_hash', passwordHash)
+      .eq('active', true)
+      .single();
+    if (error || !data) return null;
+    return data;
+  }
+  try {
+    const links = JSON.parse(localStorage.getItem('oha_share_links') || '[]');
+    return links.find(l => l.code === code && l.password_hash === passwordHash && l.active !== false) || null;
+  } catch { return null; }
+}
+
+// code로 공유 링크 존재 확인 (비밀번호 입력 전 유효성 체크)
+export async function findShareLinkByCode(code) {
+  if (sb) {
+    const { data, error } = await sb
+      .from('share_links')
+      .select('brand, active')
+      .eq('code', code)
+      .eq('active', true)
+      .single();
+    if (error || !data) return null;
+    return data;
+  }
+  try {
+    const links = JSON.parse(localStorage.getItem('oha_share_links') || '[]');
+    const link = links.find(l => l.code === code && l.active !== false);
+    return link ? { brand: link.brand, active: link.active } : null;
+  } catch { return null; }
+}
+
+// ═══════════════════════════════════════════
+// 설정 (기존)
+// ═══════════════════════════════════════════
+
 export async function loadSettings() {
   if (sb) {
     const { data } = await sb.from('ads_settings').select('*').eq('id', 'main').single();
-    return data || { pin_hash: null, font_size: 'medium' };
+    return data || { font_size: 'medium' };
   }
-  try { return JSON.parse(localStorage.getItem('oha_settings') || '{"pin_hash":null,"font_size":"medium"}'); }
-  catch { return { pin_hash: null, font_size: 'medium' }; }
+  try { return JSON.parse(localStorage.getItem('oha_settings') || '{"font_size":"medium"}'); }
+  catch { return { font_size: 'medium' }; }
 }
 
 export async function saveSettings(updates) {
@@ -158,20 +239,19 @@ export async function saveSettings(updates) {
   }
 }
 
-// ─── 중앙 데이터 관리 훅 ───
+// ═══════════════════════════════════════════
+// 중앙 데이터 관리 훅
+// ═══════════════════════════════════════════
+
 export function useStore() {
   const [data, setData] = useState({ adData: [], mappings: [] });
   const [loading, setLoading] = useState(true);
 
-  // 초기 로드
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const [adData, mappings] = await Promise.all([
-          fetchAll('ad_data'),
-          fetchAll('mappings'),
-        ]);
+        const [adData, mappings] = await Promise.all([fetchAll('ad_data'), fetchAll('mappings')]);
         if (mounted) setData({ adData: adData || [], mappings: mappings || [] });
       } catch (e) { console.error('로드 실패:', e); }
       finally { if (mounted) setLoading(false); }
@@ -179,45 +259,31 @@ export function useStore() {
     return () => { mounted = false; };
   }, []);
 
-  // 광고 데이터 업로드 (파싱된 결과)
   const uploadAdData = useCallback(async (items) => {
     const result = await upsertAdData(items);
-    // 성공 후 전체 다시 로드
     const adData = await fetchAll('ad_data');
     setData(prev => ({ ...prev, adData: adData || [] }));
     return result;
   }, []);
 
-  // 매핑 추가
   const addMapping = useCallback(async (mapping) => {
     const item = { ...mapping, id: uid() };
     const r = await insertItem('mappings', item);
-    if (r) {
-      setData(prev => ({ ...prev, mappings: [...prev.mappings, item] }));
-      return true;
-    }
+    if (r) { setData(prev => ({ ...prev, mappings: [...prev.mappings, item] })); return true; }
     return false;
   }, []);
 
-  // 매핑 삭제
   const removeMapping = useCallback(async (matchKey) => {
     if (await deleteMappingByKey(matchKey)) {
-      setData(prev => ({
-        ...prev,
-        mappings: prev.mappings.filter(m => m.match_key !== matchKey),
-      }));
+      setData(prev => ({ ...prev, mappings: prev.mappings.filter(m => m.match_key !== matchKey) }));
       return true;
     }
     return false;
   }, []);
 
-  // 광고 데이터 전체 삭제 (초기화용)
   const clearAdData = useCallback(async () => {
-    if (sb) {
-      await sb.from('ad_data').delete().neq('id', '');
-    } else {
-      localStorage.removeItem('oha_ad_data');
-    }
+    if (sb) { await sb.from('ad_data').delete().neq('id', ''); }
+    else { localStorage.removeItem('oha_ad_data'); }
     setData(prev => ({ ...prev, adData: [] }));
   }, []);
 

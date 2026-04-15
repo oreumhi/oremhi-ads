@@ -1,12 +1,12 @@
 // ============================================
-// 레이아웃 (사이드바 + 반응형)
+// 레이아웃 (사이드바 + 반응형 + 사용자 정보)
 // ============================================
 
 import React, { useState, useEffect } from 'react';
 import { C, TABS } from '../config';
 import { hasSB } from '../store';
 
-export function Layout({ tab, setTab, children }) {
+export function Layout({ tab, setTab, currentUser, onLogout, children }) {
   const [mobile, setMobile] = useState(false);
   const [menuOpen, setMenu] = useState(false);
 
@@ -17,6 +17,8 @@ export function Layout({ tab, setTab, children }) {
   }, []);
 
   const go = (id) => { setTab(id); setMenu(false); };
+
+  const roleName = currentUser?.role === 'admin' ? '관리자' : '직원';
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.tx, fontFamily: "'Noto Sans KR',-apple-system,sans-serif", fontSize: 14 }}>
@@ -38,6 +40,8 @@ export function Layout({ tab, setTab, children }) {
           <div style={{ fontSize: 14, fontWeight: 800, color: C.ac }}>주식회사 오름히</div>
           <div style={{ fontSize: 10, color: C.txd, marginTop: 2 }}>광고 성과 대시보드</div>
         </div>
+
+        {/* 탭 메뉴 */}
         <div style={{ padding: '10px 6px', flex: 1 }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => go(t.id)} style={{
@@ -52,8 +56,23 @@ export function Layout({ tab, setTab, children }) {
             </button>
           ))}
         </div>
-        <div style={{ padding: '8px 12px', borderTop: `1px solid ${C.bd}`, fontSize: 10, color: C.txm }}>
-          💾 {hasSB ? '☁️ 클라우드' : '📱 로컬'}
+
+        {/* 사용자 정보 + 로그아웃 */}
+        <div style={{ padding: '10px 12px', borderTop: `1px solid ${C.bd}` }}>
+          {currentUser && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.tx }}>{currentUser.name}</div>
+              <div style={{ fontSize: 10, color: C.txd }}>{roleName} · {currentUser.username}</div>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 10, color: C.txm }}>💾 {hasSB ? '☁️ 클라우드' : '📱 로컬'}</span>
+            {onLogout && (
+              <button onClick={onLogout} style={{ background: 'none', border: `1px solid ${C.bd}`, borderRadius: 5, padding: '3px 8px', color: C.txd, cursor: 'pointer', fontSize: 10 }}>
+                로그아웃
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
