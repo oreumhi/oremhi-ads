@@ -252,8 +252,8 @@ export default function App() {
     if (currentUser.role === 'admin') return null; // null = 전체
     try {
       const brands = JSON.parse(currentUser.assigned_brands || '[]');
-      return brands.length > 0 ? brands : [];
-    } catch { return []; }
+      return brands.length > 0 ? brands : null; // 미배정이면 전체 보기
+    } catch { return null; }
   };
 
   // ─── 렌더링 ───

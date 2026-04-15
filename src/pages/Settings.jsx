@@ -21,6 +21,8 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
   const [users, setUsers] = useState([]);
   const [newStaff, setNewStaff] = useState({ name: '', username: '', password: '' });
   const [selectedBrands, setSelectedBrands] = useState([]);
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editBrands, setEditBrands] = useState([]);
 
   // ─── 공유 링크 상태 ───
   const [shareLinks, setShareLinks] = useState([]);
@@ -45,7 +47,6 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
     if (!newStaff.username.trim()) return setMsg('❌ 아이디를 입력해주세요');
     if (newStaff.password.length < 4) return setMsg('❌ 비밀번호는 4자리 이상이어야 합니다');
     if (users.find(u => u.username === newStaff.username.trim())) return setMsg('❌ 이미 사용중인 아이디입니다');
-    if (selectedBrands.length === 0) return setMsg('❌ 담당 브랜드를 1개 이상 선택해주세요');
 
     const hash = await hashPin(newStaff.password);
     const user = await createUser({
@@ -59,7 +60,7 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
       setUsers(prev => [...prev, user]);
       setNewStaff({ name: '', username: '', password: '' });
       setSelectedBrands([]);
-      setMsg('✅ 직원 계정이 생성되었습니다');
+      setMsg('✅ 직원 계정이 생성되었습니다' + (selectedBrands.length === 0 ? ' (브랜드는 나중에 배정 가능)' : ''));
     } else {
       setMsg('❌ 계정 생성 실패');
     }
@@ -71,6 +72,27 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
     if (await deleteUser(id)) {
       setUsers(prev => prev.filter(u => u.id !== id));
       setMsg('✅ 계정이 삭제되었습니다');
+    }
+  };
+
+  // ─── 직원 브랜드 수정 ───
+  const startEditBrands = (user) => {
+    let brands = [];
+    try { brands = JSON.parse(user.assigned_brands || '[]'); } catch { brands = []; }
+    setEditingUserId(user.id);
+    setEditBrands(brands);
+  };
+
+  const toggleEditBrand = (brand) => {
+    setEditBrands(prev => prev.includes(brand) ? prev.filter(b => b !== brand) : [...prev, brand]);
+  };
+
+  const handleSaveBrands = async () => {
+    if (await updateUser(editingUserId, { assigned_brands: JSON.stringify(editBrands) })) {
+      setUsers(prev => prev.map(u => u.id === editingUserId ? { ...u, assigned_brands: JSON.stringify(editBrands) } : u));
+      setEditingUserId(null);
+      setEditBrands([]);
+      setMsg('✅ 담당 브랜드가 변경되었습니다');
     }
   };
 
@@ -153,24 +175,55 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
               {users.filter(u => u.id !== currentUser?.id).map(u => {
                 let brands = [];
                 try { brands = JSON.parse(u.assigned_brands || '[]'); } catch { brands = []; }
+                const isEditing = editingUserId === u.id;
                 return (
-                  <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: C.sf2, borderRadius: 8, marginBottom: 6 }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>
-                        {u.name}
-                        <span style={{ fontSize: 11, color: C.txd, fontWeight: 400, marginLeft: 6 }}>({u.username})</span>
-                        <span style={{ fontSize: 10, color: u.role === 'admin' ? C.ac : C.txd, marginLeft: 6, padding: '1px 6px', borderRadius: 4, background: u.role === 'admin' ? C.ac + '18' : C.sf3 }}>
-                          {u.role === 'admin' ? '관리자' : '직원'}
-                        </span>
+                  <div key={u.id} style={{ padding: '10px 12px', background: C.sf2, borderRadius: 8, marginBottom: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>
+                          {u.name}
+                          <span style={{ fontSize: 11, color: C.txd, fontWeight: 400, marginLeft: 6 }}>({u.username})</span>
+                          <span style={{ fontSize: 10, color: u.role === 'admin' ? C.ac : C.txd, marginLeft: 6, padding: '1px 6px', borderRadius: 4, background: u.role === 'admin' ? C.ac + '18' : C.sf3 }}>
+                            {u.role === 'admin' ? '관리자' : '직원'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: brands.length > 0 ? C.txd : C.warn, marginTop: 2 }}>
+                          담당: {brands.length > 0 ? brands.join(', ') : '미배정'}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: C.txd, marginTop: 2 }}>
-                        담당: {brands.length > 0 ? brands.join(', ') : '없음'}
-                      </div>
+                      {u.role !== 'admin' && (
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          <button onClick={() => isEditing ? setEditingUserId(null) : startEditBrands(u)} style={{ background: 'none', border: `1px solid ${C.ac}44`, borderRadius: 6, padding: '4px 10px', color: C.ac, cursor: 'pointer', fontSize: 11 }}>
+                            {isEditing ? '취소' : '브랜드 수정'}
+                          </button>
+                          <button onClick={() => handleDeleteUser(u.id, u.name)} style={{ background: 'none', border: `1px solid ${C.no}44`, borderRadius: 6, padding: '4px 10px', color: C.no, cursor: 'pointer', fontSize: 11 }}>
+                            삭제
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {u.role !== 'admin' && (
-                      <button onClick={() => handleDeleteUser(u.id, u.name)} style={{ background: 'none', border: `1px solid ${C.no}44`, borderRadius: 6, padding: '4px 10px', color: C.no, cursor: 'pointer', fontSize: 11 }}>
-                        삭제
-                      </button>
+                    {/* 브랜드 수정 패널 */}
+                    {isEditing && (
+                      <div style={{ marginTop: 10, padding: 10, background: C.sf3, borderRadius: 8 }}>
+                        <div style={{ fontSize: 11, color: C.txd, marginBottom: 6 }}>담당 브랜드 선택:</div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                          {allBrands.length === 0 ? (
+                            <span style={{ fontSize: 11, color: C.txm }}>매핑된 브랜드가 없습니다</span>
+                          ) : allBrands.map(b => (
+                            <button key={b} onClick={() => toggleEditBrand(b)} style={{
+                              padding: '4px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 11,
+                              background: editBrands.includes(b) ? C.ac + '22' : C.sf,
+                              color: editBrands.includes(b) ? C.ac : C.txd,
+                              border: `1px solid ${editBrands.includes(b) ? C.ac + '55' : C.bd}`,
+                            }}>
+                              {editBrands.includes(b) ? '✓ ' : ''}{b}
+                            </button>
+                          ))}
+                        </div>
+                        <button onClick={handleSaveBrands} style={{ background: C.ok, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                          저장
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
