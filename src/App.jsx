@@ -172,7 +172,7 @@ export default function App() {
   const [shareBrand, setShareBrand] = useState(null);
   const [tab, setTab] = useState('dashboard');
 
-  const { data, loading: dataLoading, uploadAdData, addMapping, removeMapping, clearAdData } = useStore(currentUser);
+  const { data, loading: dataLoading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys } = useStore(currentUser);
 
   // ─── 초기화: URL 체크 → 사용자 확인 ───
   useEffect(() => {
@@ -298,7 +298,7 @@ export default function App() {
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
       {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
-      {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} currentUser={currentUser} />}
+      {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );

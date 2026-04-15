@@ -348,5 +348,24 @@ export function useStore(currentUser) {
     setData(prev => ({ ...prev, adData: [] }));
   }, [isStaff, ownerId]);
 
-  return { data, loading, uploadAdData, addMapping, removeMapping, clearAdData };
+  // 미매핑 광고 데이터 삭제 (특정 match_key 목록)
+  const deleteAdDataByKeys = useCallback(async (matchKeys) => {
+    if (!matchKeys || matchKeys.length === 0) return;
+    if (sb) {
+      for (const mk of matchKeys) {
+        let query = sb.from('ad_data').delete().eq('match_key', mk);
+        if (ownerId) query = query.eq('owner_id', ownerId);
+        await query;
+      }
+    } else {
+      try {
+        const items = JSON.parse(localStorage.getItem('oha_ad_data') || '[]')
+          .filter(i => !matchKeys.includes(i.match_key));
+        localStorage.setItem('oha_ad_data', JSON.stringify(items));
+      } catch { /* ignore */ }
+    }
+    await loadData();
+  }, [ownerId, loadData]);
+
+  return { data, loading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys };
 }

@@ -12,7 +12,7 @@ import { C, AD_TYPE_COLORS } from '../config';
 import { findUnmappedKeys } from '../parsers';
 import { labelFromMatchKey } from '../config';
 
-export default function Mapping({ data, addMapping, removeMapping, currentUser }) {
+export default function Mapping({ data, addMapping, removeMapping, deleteAdDataByKeys, currentUser }) {
   const { adData: allAdData, mappings: allMappings } = data;
 
   // ─── 데이터 격리: 현재 사용자의 데이터만 사용 ───
@@ -130,6 +130,22 @@ export default function Mapping({ data, addMapping, removeMapping, currentUser }
     }
   };
 
+  // ─── 미매핑 데이터 삭제 ───
+  const handleDeleteUnmappedAll = async () => {
+    if (!confirm(`미매핑 데이터 ${unmapped.length}개를 전부 삭제하시겠습니까?\n해당 광고 데이터가 완전히 삭제됩니다.`)) return;
+    await deleteAdDataByKeys(unmapped.map(u => u.match_key));
+  };
+
+  const handleDeleteUnmappedByType = async (items, adType) => {
+    if (!confirm(`[${adType}] 미매핑 데이터 ${items.length}개를 삭제하시겠습니까?`)) return;
+    await deleteAdDataByKeys(items.map(u => u.match_key));
+  };
+
+  const handleDeleteUnmappedItem = async (item) => {
+    if (!confirm(`"${item.group_name || item.material_id || item.match_key}" 데이터를 삭제하시겠습니까?`)) return;
+    await deleteAdDataByKeys([item.match_key]);
+  };
+
   return (
     <div>
       <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 20 }}>매핑 관리</h2>
@@ -163,12 +179,18 @@ export default function Mapping({ data, addMapping, removeMapping, currentUser }
             <div style={{ fontSize: 15, fontWeight: 600, color: C.warn }}>
               ⚠️ 미매핑 항목 ({unmapped.length}개)
             </div>
-            {/* 미매핑 전체 매핑 버튼 */}
-            {brand && product && unmapped.length > 1 && (
-              <button onClick={handleMapAll} style={{ ...btnDanger, background: C.warn }}>
-                미매핑 전체 "{product}"로 매핑
+            <div style={{ display: 'flex', gap: 6 }}>
+              {/* 미매핑 전체 매핑 버튼 */}
+              {brand && product && unmapped.length > 1 && (
+                <button onClick={handleMapAll} style={{ ...btnDanger, background: C.warn }}>
+                  미매핑 전체 "{product}"로 매핑
+                </button>
+              )}
+              {/* 미매핑 전체 삭제 버튼 */}
+              <button onClick={handleDeleteUnmappedAll} style={btnDanger}>
+                미매핑 전체 삭제
               </button>
-            )}
+            </div>
           </div>
 
           {Object.entries(unmappedByType).map(([adType, items]) => (
@@ -178,12 +200,18 @@ export default function Mapping({ data, addMapping, removeMapping, currentUser }
                   <span style={{ color: AD_TYPE_COLORS[adType] || C.txd }}>{adType}</span>
                   <span style={{ color: C.txd, fontWeight: 400, marginLeft: 6 }}>{items.length}개</span>
                 </div>
-                {/* 광고유형별 전체 매핑 버튼 */}
-                {brand && product && (
-                  <button onClick={() => handleMapByType(items)} style={{ ...btn, background: C.warn, fontSize: 11, padding: '4px 10px' }}>
-                    전체 "{product}"로 매핑
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {/* 광고유형별 전체 매핑 버튼 */}
+                  {brand && product && (
+                    <button onClick={() => handleMapByType(items)} style={{ ...btn, background: C.warn, fontSize: 11, padding: '4px 10px' }}>
+                      전체 "{product}"로 매핑
+                    </button>
+                  )}
+                  {/* 광고유형별 전체 삭제 버튼 */}
+                  <button onClick={() => handleDeleteUnmappedByType(items, adType)} style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '3px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
+                    전체 삭제
                   </button>
-                )}
+                </div>
               </div>
 
               <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, overflow: 'hidden' }}>
@@ -199,11 +227,14 @@ export default function Mapping({ data, addMapping, removeMapping, currentUser }
                         {item.group_id && <span> · ID: {item.group_id}</span>}
                       </div>
                     </div>
-                    {brand && product ? (
-                      <button onClick={() => handleMap(item)} style={btn}>매핑</button>
-                    ) : (
-                      <span style={{ fontSize: 11, color: C.txm }}>브랜드/제품을 먼저 입력하세요</span>
-                    )}
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      {brand && product ? (
+                        <button onClick={() => handleMap(item)} style={btn}>매핑</button>
+                      ) : (
+                        <span style={{ fontSize: 11, color: C.txm }}>브랜드/제품을 먼저 입력하세요</span>
+                      )}
+                      <button onClick={() => handleDeleteUnmappedItem(item)} style={{ background: 'none', border: 'none', color: C.no, cursor: 'pointer', fontSize: 13, padding: 2 }}>✕</button>
+                    </div>
                   </div>
                 ))}
               </div>
