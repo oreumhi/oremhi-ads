@@ -21,7 +21,8 @@ export const sb = hasSB ? createClient(url, key) : null;
 
 async function fetchAll(table) {
   if (sb) {
-    const { data, error } = await sb.from(table).select('*').order('created_at', { ascending: true });
+    // Supabase 기본 1000행 제한 해제 (최대 100,000행)
+    const { data, error } = await sb.from(table).select('*').order('created_at', { ascending: true }).range(0, 99999999);
     if (error) { console.error(`[${table}] 조회:`, error.message); return []; }
     return data || [];
   }
@@ -32,7 +33,7 @@ async function fetchAll(table) {
 // 소유자별 조회 (직원용)
 async function fetchByOwner(table, ownerId) {
   if (sb) {
-    const { data, error } = await sb.from(table).select('*').eq('owner_id', ownerId).order('created_at', { ascending: true });
+    const { data, error } = await sb.from(table).select('*').eq('owner_id', ownerId).order('created_at', { ascending: true }).range(0, 99999999);
     if (error) { console.error(`[${table}] 조회(owner):`, error.message); return []; }
     return data || [];
   }
