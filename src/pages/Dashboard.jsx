@@ -51,22 +51,6 @@ function getMetricValue(items, key) {
   }
 }
 
-// ─── 추세 역행 판단 ───
-// 광고비 우상향 + 매출 우하향/정체 → true
-function isTrendDivergent(daily) {
-  if (!daily || daily.length < 3) return false;
-  const half = Math.floor(daily.length / 2);
-  const firstHalfCost = daily.slice(0, half).reduce((s, d) => s + d.cost, 0);
-  const secondHalfCost = daily.slice(half).reduce((s, d) => s + d.cost, 0);
-  const firstHalfRev = daily.slice(0, half).reduce((s, d) => s + d.conv_revenue, 0);
-  const secondHalfRev = daily.slice(half).reduce((s, d) => s + d.conv_revenue, 0);
-
-  // 광고비가 증가했고 (20% 이상), 매출이 감소했거나 정체인 경우
-  const costUp = firstHalfCost > 0 && secondHalfCost > firstHalfCost * 1.2;
-  const revDown = secondHalfRev <= firstHalfRev * 0.95;
-  return costUp && revDown;
-}
-
 export default function Dashboard({ data, allowedBrands }) {
   const { adData, mappings } = data;
   const [range, setRange] = useState(7);
@@ -150,10 +134,9 @@ export default function Dashboard({ data, allowedBrands }) {
     const cpa = calcCpa(metrics.cost, metrics.conversions);
     const roas = calcRoas(metrics.conv_revenue, metrics.cost);
 
-    // 경고 체크 (소계/합계에는 적용 안 함)
+    // 경고 체크 (소계/합계에는 적용 안 함, 설정 조건만 적용)
     const isWarn = !isSubtotal && !isTotal && checkWarning(metrics);
-    const isDivergent = !isSubtotal && !isTotal && isTrendDivergent(daily);
-    const showAlert = isWarn || isDivergent;
+    const showAlert = isWarn;
 
     const bg = showAlert ? C.no + '12' : (isTotal ? C.sf3 : isSubtotal ? C.sf2 : 'transparent');
     const fw = isSubtotal || isTotal ? 700 : 400;
@@ -173,7 +156,7 @@ export default function Dashboard({ data, allowedBrands }) {
     return (
       <tr style={{ background: bg, cursor: clickable ? 'pointer' : 'default', borderLeft: showAlert ? `3px solid ${C.no}` : 'none' }} onClick={onClick || undefined}>
         <td style={{ padding: '8px 12px', borderBottom: `1px solid ${C.bd}`, fontSize: 12.5, fontWeight: fw, color: isTotal ? C.tx : isSubtotal ? C.txd : C.tx, whiteSpace: 'nowrap' }}>
-          {showAlert && <span style={{ marginRight: 4 }} title={isWarn ? '경고 조건 해당' : '추세 역행'}>⚠️</span>}
+          {showAlert && <span style={{ marginRight: 4 }} title="경고 조건 해당">⚠️</span>}
           {clickable && <span style={{ fontSize: 10, marginRight: 4, color: C.txm }}>▼</span>}
           {prefix}{label}
         </td>
@@ -312,7 +295,7 @@ export default function Dashboard({ data, allowedBrands }) {
               </label>
             </div>
             <div style={{ fontSize: 11, color: C.txm, marginTop: 8 }}>
-              ⚠️ 체크된 조건을 <b>모두</b> 만족하는 항목에 경고 표시됩니다. 📉 광고비↑ 매출↓ 추세 역행은 항상 표시됩니다.
+              ⚠️ 체크된 조건을 <b>모두</b> 만족하는 항목에만 경고가 표시됩니다. 조건을 끄면 해당 조건은 무시됩니다.
             </div>
           </div>
         )}
