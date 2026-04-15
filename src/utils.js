@@ -8,22 +8,16 @@ export const fmt = n => {
   return Number(n).toLocaleString('ko-KR');
 };
 
-// 금액 포맷 (1.2만원, 350만원)
+// 금액 포맷: 1,234,567원 (쉼표 + 원)
 export const fmtWon = n => {
-  const v = Number(n) || 0;
-  if (v >= 100000000) return (v / 100000000).toFixed(1) + '억원';
-  if (v >= 10000) return (v / 10000).toFixed(v >= 1000000 ? 0 : 1) + '만원';
-  if (v >= 1000) return (v / 1000).toFixed(1) + '천원';
-  return v + '원';
+  const v = Math.round(Number(n) || 0);
+  return v.toLocaleString('ko-KR') + '원';
 };
 
-// 숫자 축약 (1.2만, 350만)
+// 숫자 포맷: 1,234,567 (쉼표만)
 export const fmtNum = n => {
-  const v = Number(n) || 0;
-  if (v >= 100000000) return (v / 100000000).toFixed(1) + '억';
-  if (v >= 10000) return (v / 10000).toFixed(v >= 1000000 ? 0 : 1) + '만';
-  if (v >= 1000) return (v / 1000).toFixed(1) + '천';
-  return String(v);
+  const v = Math.round(Number(n) || 0);
+  return v.toLocaleString('ko-KR');
 };
 
 // 오늘 날짜
