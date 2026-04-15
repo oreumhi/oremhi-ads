@@ -298,7 +298,7 @@ export default function App() {
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
       {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
-      {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} />}
+      {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );

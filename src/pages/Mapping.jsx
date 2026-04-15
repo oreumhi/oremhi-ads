@@ -12,8 +12,21 @@ import { C, AD_TYPE_COLORS } from '../config';
 import { findUnmappedKeys } from '../parsers';
 import { labelFromMatchKey } from '../config';
 
-export default function Mapping({ data, addMapping, removeMapping }) {
-  const { adData, mappings } = data;
+export default function Mapping({ data, addMapping, removeMapping, currentUser }) {
+  const { adData: allAdData, mappings: allMappings } = data;
+
+  // ─── 데이터 격리: 현재 사용자의 데이터만 사용 ───
+  const myOwnerId = currentUser?.id;
+  const adData = useMemo(() => {
+    if (!myOwnerId) return allAdData;
+    // 내 데이터 + 소유자 없는 이전 데이터
+    return allAdData.filter(d => d.owner_id === myOwnerId || !d.owner_id);
+  }, [allAdData, myOwnerId]);
+
+  const mappings = useMemo(() => {
+    if (!myOwnerId) return allMappings;
+    return allMappings.filter(m => m.owner_id === myOwnerId || !m.owner_id);
+  }, [allMappings, myOwnerId]);
 
   const [brand, setBrand] = useState('');
   const [product, setProduct] = useState('');

@@ -89,7 +89,7 @@ export async function upsertAdData(items) {
   if (sb) {
     const { data, error } = await sb
       .from('ad_data')
-      .upsert(items, { onConflict: 'date,match_key', ignoreDuplicates: false })
+      .upsert(items, { onConflict: 'date,match_key,owner_id', ignoreDuplicates: false })
       .select();
 
     if (error) {
@@ -97,7 +97,7 @@ export async function upsertAdData(items) {
       if (error.message.includes('duplicate') || error.message.includes('unique')) {
         let inserted = 0;
         for (const item of items) {
-          const { error: e2 } = await sb.from('ad_data').upsert(item, { onConflict: 'date,match_key' });
+          const { error: e2 } = await sb.from('ad_data').upsert(item, { onConflict: 'date,match_key,owner_id' });
           if (!e2) inserted++;
         }
         return { inserted, updated: 0 };
@@ -122,14 +122,17 @@ export async function upsertAdData(items) {
   } catch (e) { return { inserted: 0, updated: 0, error: e.message }; }
 }
 
-// ─── 매핑 삭제 ───
-export async function deleteMappingByKey(matchKey) {
+// ─── 매핑 삭제 (owner-aware) ───
+export async function deleteMappingByKey(matchKey, ownerId) {
   if (sb) {
-    const { error } = await sb.from('mappings').delete().eq('match_key', matchKey);
+    let query = sb.from('mappings').delete().eq('match_key', matchKey);
+    if (ownerId) query = query.eq('owner_id', ownerId);
+    const { error } = await query;
     return !error;
   }
   try {
-    const items = JSON.parse(localStorage.getItem('oha_mappings') || '[]').filter(i => i.match_key !== matchKey);
+    const items = JSON.parse(localStorage.getItem('oha_mappings') || '[]')
+      .filter(i => !(i.match_key === matchKey && (!ownerId || i.owner_id === ownerId)));
     localStorage.setItem('oha_mappings', JSON.stringify(items));
     return true;
   } catch { return false; }
@@ -277,17 +280,17 @@ export function useStore(currentUser) {
     return false;
   }, [ownerId]);
 
-  // 매핑 삭제
+  // 매핑 삭제 (owner-aware)
   const removeMapping = useCallback(async (matchKey) => {
-    if (await deleteMappingByKey(matchKey)) {
+    if (await deleteMappingByKey(matchKey, ownerId)) {
       setData(prev => ({
         ...prev,
-        mappings: prev.mappings.filter(m => m.match_key !== matchKey),
+        mappings: prev.mappings.filter(m => !(m.match_key === matchKey && (m.owner_id === ownerId || (!m.owner_id && !ownerId)))),
       }));
       return true;
     }
     return false;
-  }, []);
+  }, [ownerId]);
 
   // 광고 데이터 전체 삭제
   const clearAdData = useCallback(async () => {
