@@ -25,6 +25,13 @@ export default function Upload({ data, uploadAdData }) {
       // 2. 저장
       const saveResult = await uploadAdData(parsed);
 
+      // 저장 실패 체크
+      if (saveResult.error) {
+        setError('데이터 저장 실패: ' + saveResult.error);
+        setUploading(false);
+        return;
+      }
+
       // 3. 미매핑 확인
       const unmapped = findUnmappedKeys(parsed, data.mappings);
 

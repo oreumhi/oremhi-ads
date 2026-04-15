@@ -21,21 +21,48 @@ export const sb = hasSB ? createClient(url, key) : null;
 
 async function fetchAll(table) {
   if (sb) {
-    // Supabase 기본 1000행 제한 해제 (최대 100,000행)
-    const { data, error } = await sb.from(table).select('*').order('created_at', { ascending: true }).range(0, 99999999);
-    if (error) { console.error(`[${table}] 조회:`, error.message); return []; }
-    return data || [];
+    // Supabase는 한번에 1000행만 반환 → 페이지네이션으로 전체 조회
+    const allData = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await sb
+        .from(table)
+        .select('*')
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) { console.error(`[${table}] 조회:`, error.message); break; }
+      if (!data || data.length === 0) break;
+      allData.push(...data);
+      if (data.length < pageSize) break; // 마지막 페이지
+      from += pageSize;
+    }
+    return allData;
   }
   try { return JSON.parse(localStorage.getItem(`oha_${table}`) || '[]'); }
   catch { return []; }
 }
 
-// 소유자별 조회 (직원용)
+// 소유자별 조회 (직원용) - 페이지네이션 포함
 async function fetchByOwner(table, ownerId) {
   if (sb) {
-    const { data, error } = await sb.from(table).select('*').eq('owner_id', ownerId).order('created_at', { ascending: true }).range(0, 99999999);
-    if (error) { console.error(`[${table}] 조회(owner):`, error.message); return []; }
-    return data || [];
+    const allData = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      const { data, error } = await sb
+        .from(table)
+        .select('*')
+        .eq('owner_id', ownerId)
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) { console.error(`[${table}] 조회(owner):`, error.message); break; }
+      if (!data || data.length === 0) break;
+      allData.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    return allData;
   }
   try {
     return JSON.parse(localStorage.getItem(`oha_${table}`) || '[]').filter(i => i.owner_id === ownerId);
@@ -88,26 +115,38 @@ export async function upsertAdData(items) {
   if (!items || items.length === 0) return { inserted: 0, updated: 0 };
 
   if (sb) {
-    const { data, error } = await sb
+    // 1차 시도: owner_id 포함 (v4 인덱스)
+    let { data, error } = await sb
       .from('ad_data')
       .upsert(items, { onConflict: 'date,match_key,owner_id', ignoreDuplicates: false })
       .select();
 
+    // 실패 시 2차 시도: owner_id 없이 (구 인덱스)
     if (error) {
-      console.error('[ad_data] upsert:', error.message);
-      if (error.message.includes('duplicate') || error.message.includes('unique')) {
-        let inserted = 0;
-        for (const item of items) {
-          const { error: e2 } = await sb.from('ad_data').upsert(item, { onConflict: 'date,match_key,owner_id' });
-          if (!e2) inserted++;
-        }
-        return { inserted, updated: 0 };
-      }
-      return { inserted: 0, updated: 0, error: error.message };
+      console.warn('[ad_data] v4 upsert 실패, 구버전 시도:', error.message);
+      const r2 = await sb
+        .from('ad_data')
+        .upsert(items, { onConflict: 'date,match_key', ignoreDuplicates: false })
+        .select();
+      data = r2.data;
+      error = r2.error;
     }
+
+    // 둘 다 실패 시 개별 insert
+    if (error) {
+      console.warn('[ad_data] upsert 모두 실패, 개별 insert:', error.message);
+      let inserted = 0;
+      for (const item of items) {
+        const { error: e2 } = await sb.from('ad_data').insert(item);
+        if (!e2) inserted++;
+      }
+      return { inserted, updated: 0 };
+    }
+
     return { inserted: data?.length || items.length, updated: 0 };
   }
 
+  // localStorage
   try {
     const existing = JSON.parse(localStorage.getItem('oha_ad_data') || '[]');
     const existingMap = new Map();
