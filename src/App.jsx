@@ -172,7 +172,7 @@ export default function App() {
   const [shareBrand, setShareBrand] = useState(null);
   const [tab, setTab] = useState('dashboard');
 
-  const { data, loading: dataLoading, uploadAdData, addMapping, removeMapping, clearAdData } = useStore();
+  const { data, loading: dataLoading, uploadAdData, addMapping, removeMapping, clearAdData } = useStore(currentUser);
 
   // ─── 초기화: URL 체크 → 사용자 확인 ───
   useEffect(() => {

@@ -1,8 +1,10 @@
 // ============================================
-// 데이터 저장소
+// 데이터 저장소 v3
 //
-// Supabase 연결되면 클라우드 저장, 안되면 localStorage 사용.
-// v2: 다중 사용자 + 공유 링크 지원
+// 핵심 변경: 데이터 격리
+//   - 관리자 → 전체 데이터 보기
+//   - 직원 → 자기 데이터만 보기 (owner_id 기준)
+//   - 업로드/매핑 시 owner_id 자동 태깅
 // ============================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -25,6 +27,18 @@ async function fetchAll(table) {
   }
   try { return JSON.parse(localStorage.getItem(`oha_${table}`) || '[]'); }
   catch { return []; }
+}
+
+// 소유자별 조회 (직원용)
+async function fetchByOwner(table, ownerId) {
+  if (sb) {
+    const { data, error } = await sb.from(table).select('*').eq('owner_id', ownerId).order('created_at', { ascending: true });
+    if (error) { console.error(`[${table}] 조회(owner):`, error.message); return []; }
+    return data || [];
+  }
+  try {
+    return JSON.parse(localStorage.getItem(`oha_${table}`) || '[]').filter(i => i.owner_id === ownerId);
+  } catch { return []; }
 }
 
 async function insertItem(table, item) {
@@ -97,14 +111,12 @@ export async function upsertAdData(items) {
     const existing = JSON.parse(localStorage.getItem('oha_ad_data') || '[]');
     const existingMap = new Map();
     existing.forEach(item => { existingMap.set(`${item.date}||${item.match_key}`, item); });
-
     let inserted = 0, updated = 0;
     items.forEach(item => {
       const k = `${item.date}||${item.match_key}`;
       if (existingMap.has(k)) { existingMap.set(k, { ...existingMap.get(k), ...item }); updated++; }
       else { existingMap.set(k, { ...item, created_at: new Date().toISOString() }); inserted++; }
     });
-
     localStorage.setItem('oha_ad_data', JSON.stringify(Array.from(existingMap.values())));
     return { inserted, updated };
   } catch (e) { return { inserted: 0, updated: 0, error: e.message }; }
@@ -124,35 +136,17 @@ export async function deleteMappingByKey(matchKey) {
 }
 
 // ═══════════════════════════════════════════
-// 사용자 관리 (v2)
+// 사용자 관리
 // ═══════════════════════════════════════════
 
-export async function fetchUsers() {
-  return await fetchAll('users');
-}
+export async function fetchUsers() { return await fetchAll('users'); }
+export async function createUser(user) { return await insertItem('users', { ...user, id: uid() }); }
+export async function deleteUser(id) { return await deleteItem('users', id); }
+export async function updateUser(id, updates) { return await updateItem('users', id, updates); }
 
-export async function createUser(user) {
-  const item = { ...user, id: uid() };
-  return await insertItem('users', item);
-}
-
-export async function deleteUser(id) {
-  return await deleteItem('users', id);
-}
-
-export async function updateUser(id, updates) {
-  return await updateItem('users', id, updates);
-}
-
-// 로그인: username + password_hash로 사용자 찾기
 export async function authenticateUser(username, passwordHash) {
   if (sb) {
-    const { data, error } = await sb
-      .from('users')
-      .select('*')
-      .eq('username', username)
-      .eq('password_hash', passwordHash)
-      .single();
+    const { data, error } = await sb.from('users').select('*').eq('username', username).eq('password_hash', passwordHash).single();
     if (error || !data) return null;
     return data;
   }
@@ -163,32 +157,16 @@ export async function authenticateUser(username, passwordHash) {
 }
 
 // ═══════════════════════════════════════════
-// 공유 링크 관리 (v2)
+// 공유 링크 관리
 // ═══════════════════════════════════════════
 
-export async function fetchShareLinks() {
-  return await fetchAll('share_links');
-}
+export async function fetchShareLinks() { return await fetchAll('share_links'); }
+export async function createShareLink(link) { return await insertItem('share_links', { ...link, id: uid() }); }
+export async function deleteShareLink(id) { return await deleteItem('share_links', id); }
 
-export async function createShareLink(link) {
-  const item = { ...link, id: uid() };
-  return await insertItem('share_links', item);
-}
-
-export async function deleteShareLink(id) {
-  return await deleteItem('share_links', id);
-}
-
-// 공유 링크 인증: code + password_hash로 찾기
 export async function authenticateShareLink(code, passwordHash) {
   if (sb) {
-    const { data, error } = await sb
-      .from('share_links')
-      .select('*')
-      .eq('code', code)
-      .eq('password_hash', passwordHash)
-      .eq('active', true)
-      .single();
+    const { data, error } = await sb.from('share_links').select('*').eq('code', code).eq('password_hash', passwordHash).eq('active', true).single();
     if (error || !data) return null;
     return data;
   }
@@ -198,15 +176,9 @@ export async function authenticateShareLink(code, passwordHash) {
   } catch { return null; }
 }
 
-// code로 공유 링크 존재 확인 (비밀번호 입력 전 유효성 체크)
 export async function findShareLinkByCode(code) {
   if (sb) {
-    const { data, error } = await sb
-      .from('share_links')
-      .select('brand, active')
-      .eq('code', code)
-      .eq('active', true)
-      .single();
+    const { data, error } = await sb.from('share_links').select('brand, active').eq('code', code).eq('active', true).single();
     if (error || !data) return null;
     return data;
   }
@@ -218,7 +190,7 @@ export async function findShareLinkByCode(code) {
 }
 
 // ═══════════════════════════════════════════
-// 설정 (기존)
+// 설정
 // ═══════════════════════════════════════════
 
 export async function loadSettings() {
@@ -240,52 +212,98 @@ export async function saveSettings(updates) {
 }
 
 // ═══════════════════════════════════════════
-// 중앙 데이터 관리 훅
+// 중앙 데이터 관리 훅 (v3: 데이터 격리)
+//
+// currentUser를 받아서:
+//   관리자 → 전체 데이터 로드
+//   직원   → owner_id가 자기 ID인 데이터만 로드
+//   null   → 전체 데이터 로드 (공유 링크용)
 // ═══════════════════════════════════════════
 
-export function useStore() {
+export function useStore(currentUser) {
   const [data, setData] = useState({ adData: [], mappings: [] });
   const [loading, setLoading] = useState(true);
 
+  const isAdmin = currentUser?.role === 'admin';
+  const ownerId = currentUser?.id;
+  const isStaff = currentUser?.role === 'staff';
+
+  // 데이터 로드 함수
+  const loadData = useCallback(async () => {
+    try {
+      let adData, mappings;
+      if (isStaff && ownerId) {
+        // 직원: 자기 데이터만
+        [adData, mappings] = await Promise.all([
+          fetchByOwner('ad_data', ownerId),
+          fetchByOwner('mappings', ownerId),
+        ]);
+      } else {
+        // 관리자 또는 공유 링크: 전체
+        [adData, mappings] = await Promise.all([
+          fetchAll('ad_data'),
+          fetchAll('mappings'),
+        ]);
+      }
+      setData({ adData: adData || [], mappings: mappings || [] });
+    } catch (e) { console.error('로드 실패:', e); }
+    finally { setLoading(false); }
+  }, [isStaff, ownerId, isAdmin]);
+
+  // currentUser가 바뀌면 데이터 다시 로드
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const [adData, mappings] = await Promise.all([fetchAll('ad_data'), fetchAll('mappings')]);
-        if (mounted) setData({ adData: adData || [], mappings: mappings || [] });
-      } catch (e) { console.error('로드 실패:', e); }
-      finally { if (mounted) setLoading(false); }
-    })();
-    return () => { mounted = false; };
-  }, []);
+    setLoading(true);
+    loadData();
+  }, [loadData]);
 
+  // 광고 데이터 업로드 (owner_id 자동 태깅)
   const uploadAdData = useCallback(async (items) => {
-    const result = await upsertAdData(items);
-    const adData = await fetchAll('ad_data');
-    setData(prev => ({ ...prev, adData: adData || [] }));
+    // 현재 사용자의 ID를 owner_id로 태깅
+    const tagged = ownerId ? items.map(i => ({ ...i, owner_id: ownerId })) : items;
+    const result = await upsertAdData(tagged);
+    // 다시 로드
+    await loadData();
     return result;
-  }, []);
+  }, [ownerId, loadData]);
 
+  // 매핑 추가 (owner_id 자동 태깅)
   const addMapping = useCallback(async (mapping) => {
-    const item = { ...mapping, id: uid() };
+    const item = { ...mapping, id: uid(), owner_id: ownerId || null };
     const r = await insertItem('mappings', item);
-    if (r) { setData(prev => ({ ...prev, mappings: [...prev.mappings, item] })); return true; }
+    if (r) {
+      setData(prev => ({ ...prev, mappings: [...prev.mappings, item] }));
+      return true;
+    }
     return false;
-  }, []);
+  }, [ownerId]);
 
+  // 매핑 삭제
   const removeMapping = useCallback(async (matchKey) => {
     if (await deleteMappingByKey(matchKey)) {
-      setData(prev => ({ ...prev, mappings: prev.mappings.filter(m => m.match_key !== matchKey) }));
+      setData(prev => ({
+        ...prev,
+        mappings: prev.mappings.filter(m => m.match_key !== matchKey),
+      }));
       return true;
     }
     return false;
   }, []);
 
+  // 광고 데이터 전체 삭제
   const clearAdData = useCallback(async () => {
-    if (sb) { await sb.from('ad_data').delete().neq('id', ''); }
-    else { localStorage.removeItem('oha_ad_data'); }
+    if (sb) {
+      if (isStaff && ownerId) {
+        // 직원: 자기 데이터만 삭제
+        await sb.from('ad_data').delete().eq('owner_id', ownerId);
+      } else {
+        // 관리자: 전체 삭제
+        await sb.from('ad_data').delete().neq('id', '');
+      }
+    } else {
+      localStorage.removeItem('oha_ad_data');
+    }
     setData(prev => ({ ...prev, adData: [] }));
-  }, []);
+  }, [isStaff, ownerId]);
 
   return { data, loading, uploadAdData, addMapping, removeMapping, clearAdData };
 }
