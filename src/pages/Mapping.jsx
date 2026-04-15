@@ -19,13 +19,14 @@ export default function Mapping({ data, addMapping, removeMapping, currentUser }
   const myOwnerId = currentUser?.id;
   const adData = useMemo(() => {
     if (!myOwnerId) return allAdData;
-    // 내 데이터 + 소유자 없는 이전 데이터
-    return allAdData.filter(d => d.owner_id === myOwnerId || !d.owner_id);
+    // 정확히 내 소유 데이터만 (NULL 제외)
+    return allAdData.filter(d => d.owner_id === myOwnerId);
   }, [allAdData, myOwnerId]);
 
   const mappings = useMemo(() => {
     if (!myOwnerId) return allMappings;
-    return allMappings.filter(m => m.owner_id === myOwnerId || !m.owner_id);
+    // 정확히 내 소유 매핑만 (NULL 제외)
+    return allMappings.filter(m => m.owner_id === myOwnerId);
   }, [allMappings, myOwnerId]);
 
   const [brand, setBrand] = useState('');
