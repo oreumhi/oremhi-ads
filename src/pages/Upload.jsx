@@ -108,7 +108,7 @@ export default function Upload({ data, uploadAdData }) {
       <input
         ref={fileRef}
         type="file"
-        accept=".csv"
+        accept=".csv,.CSV"
         style={{ display: 'none' }}
         onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
       />

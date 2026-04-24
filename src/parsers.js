@@ -22,18 +22,40 @@ function readCsv(file) {
     reader.onload = (e) => {
       const buffer = e.target.result;
 
-      // 1차: UTF-8로 시도
-      let text = new TextDecoder('utf-8').decode(buffer);
+      // 인코딩 자동 감지 (여러 인코딩 시도)
+      let text = '';
+      let detectedEncoding = '';
 
-      // 한글 깨짐 감지: UTF-8로 읽었을 때 캠페인유형/광고 등의 키워드가 없으면 EUC-KR로 재시도
-      if (!text.includes('캠페인') && !text.includes('광고') && !text.includes('노출')) {
+      // 1차: UTF-8
+      const utf8Text = new TextDecoder('utf-8').decode(buffer);
+      const hasKoreanUTF8 = /[가-힣]/.test(utf8Text) && (utf8Text.includes('캠페인') || utf8Text.includes('광고') || utf8Text.includes('노출') || utf8Text.includes('클릭') || utf8Text.includes('비용') || utf8Text.includes('기간'));
+
+      if (hasKoreanUTF8) {
+        text = utf8Text;
+        detectedEncoding = 'UTF-8';
+      } else {
+        // 2차: EUC-KR (CP949 포함)
         try {
-          text = new TextDecoder('euc-kr').decode(buffer);
-        } catch { /* UTF-8 유지 */ }
+          const eucText = new TextDecoder('euc-kr').decode(buffer);
+          const hasKoreanEUC = /[가-힣]/.test(eucText) && (eucText.includes('캠페인') || eucText.includes('광고') || eucText.includes('노출') || eucText.includes('클릭') || eucText.includes('비용') || eucText.includes('기간'));
+          if (hasKoreanEUC) {
+            text = eucText;
+            detectedEncoding = 'EUC-KR';
+          } else {
+            // 3차: 한글이 하나라도 있으면 EUC-KR 우선, 없으면 UTF-8
+            text = /[가-힣]/.test(eucText) ? eucText : utf8Text;
+            detectedEncoding = /[가-힣]/.test(eucText) ? 'EUC-KR(추정)' : 'UTF-8(추정)';
+          }
+        } catch {
+          text = utf8Text;
+          detectedEncoding = 'UTF-8(기본)';
+        }
       }
 
       // BOM 제거
       if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+      console.log('[파서] 인코딩:', detectedEncoding, '| 파일명:', file.name, '| 크기:', file.size, '바이트');
 
       Papa.parse(text, {
         header: false,
@@ -47,29 +69,37 @@ function readCsv(file) {
   });
 }
 
-// ─── 파일 유형 자동 감지 ───
-// 첫 몇 행을 보고 검색광고인지 GFA인지 판별
+// ─── 파일 유형 자동 감지 (개선) ───
 export function detectFileType(rows) {
   if (!rows || rows.length < 2) return null;
 
-  // 검색광고: 첫 행이 "소재 보고서..." 형태
   const firstRow = (rows[0] || []).join('');
-  if (firstRow.includes('보고서') || firstRow.includes('1889') || firstRow.match(/^\d+$/)) {
-    // 둘째 행에 검색광고 헤더 확인
-    const secondRow = (rows[1] || []).join('');
-    if (secondRow.includes('캠페인유형') || secondRow.includes('광고그룹유형')) {
+  const secondRow = (rows[1] || []).join('');
+  const thirdRow = (rows[2] || []).join('');
+
+  // 검색광고: 첫 행이 제목행 (보고서명, 숫자ID 등)
+  if (firstRow.includes('보고서') || firstRow.match(/^\d{4,}/) || firstRow.match(/^[0-9,]+$/)) {
+    if (secondRow.includes('캠페인유형') || secondRow.includes('광고그룹유형') || secondRow.includes('캠페인') && secondRow.includes('소재')) {
       return 'search';
     }
   }
 
   // GFA: 첫 행에 GFA 특유의 컬럼명
-  if (firstRow.includes('광고 그룹 이름') || firstRow.includes('캠페인 ID') || firstRow.includes('평균 CPM')) {
+  if (firstRow.includes('광고 그룹 이름') || firstRow.includes('캠페인 ID') || firstRow.includes('평균 CPM') || firstRow.includes('캠페인 이름') && firstRow.includes('기간')) {
     return 'gfa';
   }
 
   // 첫 행이 검색광고 헤더일 수도 있음 (제목행이 없는 경우)
-  if (firstRow.includes('캠페인유형')) {
+  if (firstRow.includes('캠페인유형') || (firstRow.includes('캠페인') && firstRow.includes('소재') && firstRow.includes('노출수'))) {
     return 'search_no_title';
+  }
+
+  // 2행 또는 3행에서 다시 시도 (앞에 빈 행이 있을 수 있음)
+  if (secondRow.includes('캠페인유형') || (secondRow.includes('캠페인') && secondRow.includes('노출수'))) {
+    return 'search';
+  }
+  if (secondRow.includes('광고 그룹 이름') || secondRow.includes('캠페인 ID')) {
+    return 'gfa';
   }
 
   return null;
@@ -266,9 +296,13 @@ export async function parseFile(file) {
   // 2. 파일 유형 감지
   const fileType = detectFileType(rows);
   if (!fileType) {
+    // 디버그 정보 포함
+    const firstRow = (rows[0] || []).join(', ').slice(0, 100);
+    const secondRow = (rows[1] || []).join(', ').slice(0, 100);
     throw new Error(
       '파일 유형을 인식할 수 없습니다.\n' +
-      '검색광고 보고서 또는 GFA 보고서 CSV 파일을 올려주세요.'
+      '검색광고 보고서 또는 GFA 보고서 CSV 파일을 올려주세요.\n\n' +
+      `[진단정보]\n1행: ${firstRow || '(비어있음)'}\n2행: ${secondRow || '(비어있음)'}\n총 ${rows.length}행`
     );
   }
 
