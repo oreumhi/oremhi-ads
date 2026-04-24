@@ -51,7 +51,7 @@ function getMetricValue(items, key) {
   }
 }
 
-export default function Dashboard({ data, allowedBrands }) {
+export default function Dashboard({ data, allowedBrands, changeRange }) {
   const { adData, mappings } = data;
   const [range, setRange] = useState(7);
   const [selectedBrand, setSelectedBrand] = useState('전체');
@@ -74,8 +74,19 @@ export default function Dashboard({ data, allowedBrands }) {
     revenueEnabled: false, revenueThreshold: 100000,
   });
   const [showWarningPanel, setShowWarningPanel] = useState(false);
+  const [rangeLoading, setRangeLoading] = useState(false);
 
   const toggleExpand = (key) => { setExpanded(prev => ({ ...prev, [key]: !prev[key] })); };
+
+  // 기간 변경 시 서버에서 해당 기간 데이터 로드
+  const handleRangeChange = async (newRange) => {
+    setRange(newRange);
+    if (changeRange) {
+      setRangeLoading(true);
+      await changeRange(newRange);
+      setRangeLoading(false);
+    }
+  };
 
   const handleSort = (key) => {
     if (sortKey === key) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
@@ -240,7 +251,7 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
         </div>
         <div style={{ display: 'flex', gap: 3, background: C.sf, borderRadius: 10, padding: 3, border: `1px solid ${C.bd}` }}>
           {RANGES.map(r => (
-            <button key={r.value} onClick={() => setRange(r.value)} style={{
+            <button key={r.value} onClick={() => handleRangeChange(r.value)} style={{
               padding: '7px 13px', borderRadius: 7, border: 'none', cursor: 'pointer',
               fontSize: 13, fontWeight: range === r.value ? 600 : 400,
               background: range === r.value ? C.ac : 'transparent',
@@ -328,6 +339,13 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
           </div>
         )}
       </div>
+
+      {/* 기간 변경 로딩 */}
+      {rangeLoading && (
+        <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 20, textAlign: 'center', marginBottom: 14 }}>
+          <div style={{ color: C.txd, fontSize: 13 }}>📊 기간 데이터를 불러오는 중...</div>
+        </div>
+      )}
 
       {/* 데이터 없을 때 */}
       {!hasData && (

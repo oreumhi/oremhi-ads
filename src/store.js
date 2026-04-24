@@ -264,60 +264,122 @@ export async function saveSettings(updates) {
   }
 }
 
+// ─── 날짜 범위 필터 조회 (성능 최적화) ───
+function getCutoffDate(rangeDays) {
+  if (!rangeDays || rangeDays <= 0) return null; // 전체
+  const d = new Date();
+  d.setDate(d.getDate() - rangeDays);
+  return d.toISOString().slice(0, 10);
+}
+
+async function fetchAdDataByRange(rangeDays) {
+  const cutoff = getCutoffDate(rangeDays);
+  if (sb) {
+    const allData = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      let query = sb.from('ad_data').select('*').order('created_at', { ascending: true }).range(from, from + pageSize - 1);
+      if (cutoff) query = query.gte('date', cutoff);
+      const { data, error } = await query;
+      if (error) { console.error('[ad_data] 범위 조회:', error.message); break; }
+      if (!data || data.length === 0) break;
+      allData.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    return allData;
+  }
+  try {
+    const items = JSON.parse(localStorage.getItem('oha_ad_data') || '[]');
+    return cutoff ? items.filter(i => i.date >= cutoff) : items;
+  } catch { return []; }
+}
+
+async function fetchAdDataByRangeAndOwner(rangeDays, ownerId) {
+  const cutoff = getCutoffDate(rangeDays);
+  if (sb) {
+    const allData = [];
+    const pageSize = 1000;
+    let from = 0;
+    while (true) {
+      let query = sb.from('ad_data').select('*').eq('owner_id', ownerId).order('created_at', { ascending: true }).range(from, from + pageSize - 1);
+      if (cutoff) query = query.gte('date', cutoff);
+      const { data, error } = await query;
+      if (error) { console.error('[ad_data] 범위 조회(owner):', error.message); break; }
+      if (!data || data.length === 0) break;
+      allData.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    return allData;
+  }
+  try {
+    const items = JSON.parse(localStorage.getItem('oha_ad_data') || '[]').filter(i => i.owner_id === ownerId);
+    return cutoff ? items.filter(i => i.date >= cutoff) : items;
+  } catch { return []; }
+}
+
 // ═══════════════════════════════════════════
-// 중앙 데이터 관리 훅 (v3: 데이터 격리)
+// 중앙 데이터 관리 훅 (v4: 범위별 로드)
 //
-// currentUser를 받아서:
-//   관리자 → 전체 데이터 로드
-//   직원   → owner_id가 자기 ID인 데이터만 로드
-//   null   → 전체 데이터 로드 (공유 링크용)
+// 초기 로드: 최근 7일만 (빠른 첫 화면)
+// 기간 변경: 해당 기간만 추가 로드
 // ═══════════════════════════════════════════
 
 export function useStore(currentUser) {
   const [data, setData] = useState({ adData: [], mappings: [] });
   const [loading, setLoading] = useState(true);
+  const [loadedRange, setLoadedRange] = useState(0); // 현재 로드된 범위 (일수)
 
   const isAdmin = currentUser?.role === 'admin';
   const ownerId = currentUser?.id;
   const isStaff = currentUser?.role === 'staff';
 
-  // 데이터 로드 함수
-  const loadData = useCallback(async () => {
+  // 범위별 데이터 로드 함수
+  const loadData = useCallback(async (rangeDays = 7) => {
     try {
       let adData, mappings;
       if (isStaff && ownerId) {
-        // 직원: 자기 데이터만
         [adData, mappings] = await Promise.all([
-          fetchByOwner('ad_data', ownerId),
+          fetchAdDataByRangeAndOwner(rangeDays, ownerId),
           fetchByOwner('mappings', ownerId),
         ]);
       } else {
-        // 관리자 또는 공유 링크: 전체
         [adData, mappings] = await Promise.all([
-          fetchAll('ad_data'),
+          fetchAdDataByRange(rangeDays),
           fetchAll('mappings'),
         ]);
       }
       setData({ adData: adData || [], mappings: mappings || [] });
+      setLoadedRange(rangeDays);
     } catch (e) { console.error('로드 실패:', e); }
     finally { setLoading(false); }
   }, [isStaff, ownerId, isAdmin]);
 
-  // currentUser가 바뀌면 데이터 다시 로드
+  // 초기 로드: 최근 7일만
   useEffect(() => {
     setLoading(true);
-    loadData();
+    loadData(7);
   }, [loadData]);
+
+  // 기간 변경 시 호출 (Dashboard에서 호출)
+  const changeRange = useCallback(async (newRange) => {
+    // 이미 로드된 범위보다 작거나 같으면 재요청 불필요
+    // (0 = 전체, 양수 = 일수, 전체는 항상 재요청)
+    if (newRange > 0 && loadedRange >= newRange && loadedRange > 0) return;
+    if (newRange === 0 && loadedRange === 0) return;
+    setLoading(true);
+    await loadData(newRange);
+  }, [loadedRange, loadData]);
 
   // 광고 데이터 업로드 (owner_id 자동 태깅 + 배치 업로드)
   const uploadAdData = useCallback(async (items, onProgress) => {
-    // 현재 사용자의 ID를 owner_id로 태깅
     const tagged = ownerId ? items.map(i => ({ ...i, owner_id: ownerId })) : items;
     const result = await upsertAdData(tagged, onProgress);
-    // 다시 로드
-    await loadData();
+    await loadData(loadedRange || 7);
     return result;
-  }, [ownerId, loadData]);
+  }, [ownerId, loadData, loadedRange]);
 
   // 매핑 추가 (owner_id 자동 태깅)
   const addMapping = useCallback(async (mapping) => {
@@ -374,8 +436,8 @@ export function useStore(currentUser) {
         localStorage.setItem('oha_ad_data', JSON.stringify(items));
       } catch { /* ignore */ }
     }
-    await loadData();
-  }, [ownerId, loadData]);
+    await loadData(loadedRange || 7);
+  }, [ownerId, loadData, loadedRange]);
 
-  return { data, loading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys };
+  return { data, loading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange };
 }
