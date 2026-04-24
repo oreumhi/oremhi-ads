@@ -1,18 +1,24 @@
 // ============================================
-// 스파크라인 차트 컴포넌트
-// 수정: 0%일 때 흰색(회색) 표시
+// 스파크라인 차트 컴포넌트 (성능 최적화)
+// - React.memo로 불필요한 리렌더 방지
+// - Math.min/max 대신 reduce 사용 (대량 데이터 안전)
 // ============================================
 
 import React from 'react';
 
-export function Sparkline({ data, color = '#5b8def', width = 110, height = 28 }) {
+export const Sparkline = React.memo(function Sparkline({ data, color = '#5b8def', width = 110, height = 28 }) {
   if (!data || data.length < 2) {
     return <span style={{ color: '#555c74', fontSize: 11 }}>-</span>;
   }
 
   const vals = data.map(d => (typeof d === 'number' ? d : d.value || 0));
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
+
+  // reduce 사용 (spread 연산자는 대량 배열에서 stack overflow 가능)
+  let min = vals[0], max = vals[0];
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i] < min) min = vals[i];
+    if (vals[i] > max) max = vals[i];
+  }
   const range = max - min || 1;
 
   const points = vals.map((v, i) => {
@@ -50,4 +56,4 @@ export function Sparkline({ data, color = '#5b8def', width = 110, height = 28 })
       </span>
     </div>
   );
-}
+});

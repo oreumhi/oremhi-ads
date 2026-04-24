@@ -110,40 +110,51 @@ async function updateItem(table, id, updates) {
   } catch { return false; }
 }
 
-// ─── 광고 데이터 일괄 업로드 (upsert) ───
-export async function upsertAdData(items) {
+// ─── 광고 데이터 일괄 업로드 (배치 upsert) ───
+export async function upsertAdData(items, onProgress) {
   if (!items || items.length === 0) return { inserted: 0, updated: 0 };
 
+  const BATCH_SIZE = 500;
+  let totalInserted = 0;
+  let totalUpdated = 0;
+  const totalBatches = Math.ceil(items.length / BATCH_SIZE);
+
   if (sb) {
-    // 1차 시도: owner_id 포함 (v4 인덱스)
-    let { data, error } = await sb
-      .from('ad_data')
-      .upsert(items, { onConflict: 'date,match_key,owner_id', ignoreDuplicates: false })
-      .select();
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
+      const batch = items.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
 
-    // 실패 시 2차 시도: owner_id 없이 (구 인덱스)
-    if (error) {
-      console.warn('[ad_data] v4 upsert 실패, 구버전 시도:', error.message);
-      const r2 = await sb
+      if (onProgress) onProgress({ current: batchNum, total: totalBatches, rows: i + batch.length, totalRows: items.length });
+
+      // 1차 시도: owner_id 포함 (v4 인덱스)
+      let { data, error } = await sb
         .from('ad_data')
-        .upsert(items, { onConflict: 'date,match_key', ignoreDuplicates: false })
+        .upsert(batch, { onConflict: 'date,match_key,owner_id', ignoreDuplicates: false })
         .select();
-      data = r2.data;
-      error = r2.error;
-    }
 
-    // 둘 다 실패 시 개별 insert
-    if (error) {
-      console.warn('[ad_data] upsert 모두 실패, 개별 insert:', error.message);
-      let inserted = 0;
-      for (const item of items) {
-        const { error: e2 } = await sb.from('ad_data').insert(item);
-        if (!e2) inserted++;
+      // 실패 시 2차 시도: owner_id 없이 (구 인덱스)
+      if (error) {
+        console.warn(`[ad_data] 배치 ${batchNum} v4 upsert 실패, 구버전 시도:`, error.message);
+        const r2 = await sb
+          .from('ad_data')
+          .upsert(batch, { onConflict: 'date,match_key', ignoreDuplicates: false })
+          .select();
+        data = r2.data;
+        error = r2.error;
       }
-      return { inserted, updated: 0 };
-    }
 
-    return { inserted: data?.length || items.length, updated: 0 };
+      // 둘 다 실패 시 개별 insert
+      if (error) {
+        console.warn(`[ad_data] 배치 ${batchNum} upsert 모두 실패, 개별 insert:`, error.message);
+        for (const item of batch) {
+          const { error: e2 } = await sb.from('ad_data').insert(item);
+          if (!e2) totalInserted++;
+        }
+      } else {
+        totalInserted += data?.length || batch.length;
+      }
+    }
+    return { inserted: totalInserted, updated: totalUpdated };
   }
 
   // localStorage
@@ -151,14 +162,13 @@ export async function upsertAdData(items) {
     const existing = JSON.parse(localStorage.getItem('oha_ad_data') || '[]');
     const existingMap = new Map();
     existing.forEach(item => { existingMap.set(`${item.date}||${item.match_key}`, item); });
-    let inserted = 0, updated = 0;
     items.forEach(item => {
       const k = `${item.date}||${item.match_key}`;
-      if (existingMap.has(k)) { existingMap.set(k, { ...existingMap.get(k), ...item }); updated++; }
-      else { existingMap.set(k, { ...item, created_at: new Date().toISOString() }); inserted++; }
+      if (existingMap.has(k)) { existingMap.set(k, { ...existingMap.get(k), ...item }); totalUpdated++; }
+      else { existingMap.set(k, { ...item, created_at: new Date().toISOString() }); totalInserted++; }
     });
     localStorage.setItem('oha_ad_data', JSON.stringify(Array.from(existingMap.values())));
-    return { inserted, updated };
+    return { inserted: totalInserted, updated: totalUpdated };
   } catch (e) { return { inserted: 0, updated: 0, error: e.message }; }
 }
 
@@ -299,11 +309,11 @@ export function useStore(currentUser) {
     loadData();
   }, [loadData]);
 
-  // 광고 데이터 업로드 (owner_id 자동 태깅)
-  const uploadAdData = useCallback(async (items) => {
+  // 광고 데이터 업로드 (owner_id 자동 태깅 + 배치 업로드)
+  const uploadAdData = useCallback(async (items, onProgress) => {
     // 현재 사용자의 ID를 owner_id로 태깅
     const tagged = ownerId ? items.map(i => ({ ...i, owner_id: ownerId })) : items;
-    const result = await upsertAdData(tagged);
+    const result = await upsertAdData(tagged, onProgress);
     // 다시 로드
     await loadData();
     return result;

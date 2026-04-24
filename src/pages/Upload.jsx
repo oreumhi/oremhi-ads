@@ -11,24 +11,38 @@ export default function Upload({ data, uploadAdData }) {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState(null);
   const fileRef = useRef();
 
   const handleFile = async (file) => {
     setUploading(true);
     setError('');
     setResult(null);
+    setProgress(null);
 
     try {
       // 1. 파싱
+      setProgress({ stage: 'parsing', message: '파일을 분석하는 중...' });
       const { data: parsed, summary } = await parseFile(file);
 
-      // 2. 저장
-      const saveResult = await uploadAdData(parsed);
+      // 2. 저장 (배치 + 진행률)
+      setProgress({ stage: 'uploading', message: '데이터를 저장하는 중...', current: 0, total: 1, rows: 0, totalRows: parsed.length });
+      const saveResult = await uploadAdData(parsed, (p) => {
+        setProgress({
+          stage: 'uploading',
+          message: `저장 중... (${p.current}/${p.total} 배치, ${fmt(p.rows)}/${fmt(p.totalRows)}행)`,
+          current: p.current,
+          total: p.total,
+          rows: p.rows,
+          totalRows: p.totalRows,
+        });
+      });
 
       // 저장 실패 체크
       if (saveResult.error) {
         setError('데이터 저장 실패: ' + saveResult.error);
         setUploading(false);
+        setProgress(null);
         return;
       }
 
@@ -46,6 +60,7 @@ export default function Upload({ data, uploadAdData }) {
     }
 
     setUploading(false);
+    setProgress(null);
   };
 
   const handleDrop = (e) => {
@@ -98,11 +113,19 @@ export default function Upload({ data, uploadAdData }) {
         onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
       />
 
-      {/* 업로드 중 */}
+      {/* 업로드 중 + 진행률 */}
       {uploading && (
         <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 30, textAlign: 'center' }}>
           <div style={{ fontSize: 24, marginBottom: 8, animation: 'spin 1s linear infinite' }}>⏳</div>
-          <div style={{ color: C.txd }}>파일을 분석하고 저장하는 중...</div>
+          <div style={{ color: C.txd, marginBottom: 12 }}>{progress?.message || '파일을 분석하는 중...'}</div>
+          {progress?.stage === 'uploading' && progress.total > 0 && (
+            <div>
+              <div style={{ background: '#1a1e2c', borderRadius: 8, height: 8, overflow: 'hidden', marginBottom: 6 }}>
+                <div style={{ background: C.ac, height: '100%', borderRadius: 8, width: `${(progress.current / progress.total) * 100}%`, transition: 'width 0.3s ease' }} />
+              </div>
+              <div style={{ fontSize: 11, color: C.txm }}>{fmt(progress.rows)} / {fmt(progress.totalRows)}행 완료</div>
+            </div>
+          )}
           <style>{`@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
         </div>
       )}

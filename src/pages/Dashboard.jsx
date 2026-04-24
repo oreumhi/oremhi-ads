@@ -126,8 +126,16 @@ export default function Dashboard({ data, allowedBrands }) {
     return { brands, unmapped };
   }, [adData, mappings, range]);
 
-  // ─── 지표 행 렌더 ───
-  function MetricRow({ label, items, isSubtotal, isTotal, onClick, clickable }) {
+// 스타일 상수
+const th = { padding: '9px 12px', textAlign: 'left', fontSize: 11, color: '#8890a6', fontWeight: 700, borderBottom: '1px solid #282d40', whiteSpace: 'nowrap' };
+const thR = { ...th, textAlign: 'right' };
+const thC = { ...th, textAlign: 'center' };
+const tdR = { padding: '8px 12px', borderBottom: '1px solid #282d40', fontSize: 12.5, textAlign: 'right', whiteSpace: 'nowrap' };
+const tdC = { padding: '6px 8px', borderBottom: '1px solid #282d40', textAlign: 'center', whiteSpace: 'nowrap' };
+const numInp = { background: '#1a1e2c', border: '1px solid #282d40', borderRadius: 6, padding: '4px 8px', color: '#e4e7ed', fontSize: 12, outline: 'none', width: 80, textAlign: 'right' };
+
+// ─── 지표 행 렌더 (React.memo 최적화) ───
+const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, isTotal, onClick, clickable, visibleGraphs, checkWarning }) {
     const metrics = sumMetrics(items);
     const daily = aggregateByDate(items);
     const ctr = calcCtr(metrics.clicks, metrics.impressions);
@@ -172,7 +180,7 @@ export default function Dashboard({ data, allowedBrands }) {
         ))}
       </tr>
     );
-  }
+  });
 
   // ─── 테이블 헤더 (정렬 클릭 + 그래프 필터) ───
   const Header = () => (
@@ -397,27 +405,33 @@ export default function Dashboard({ data, allowedBrands }) {
                             <React.Fragment key={adType}>
                               {hasMultiple ? (
                                 <>
-                                  <MetricRow
+                                  <MemoMetricRow
                                     label={`${adType} 합계`}
                                     items={allRows}
                                     isSubtotal
                                     clickable
                                     onClick={() => toggleExpand(expandKey)}
+                                    visibleGraphs={visibleGraphs}
+                                    checkWarning={checkWarning}
                                   />
                                   {isExpanded && sortedMKs.map(mk => (
-                                    <MetricRow
+                                    <MemoMetricRow
                                       key={mk}
                                       label={<span><span style={{ color: atColor, fontSize: 11, marginRight: 6 }}>[{adType}]</span>{items[mk].label}</span>}
                                       items={items[mk].rows}
+                                      visibleGraphs={visibleGraphs}
+                                      checkWarning={checkWarning}
                                     />
                                   ))}
                                 </>
                               ) : (
                                 sortedMKs.map(mk => (
-                                  <MetricRow
+                                  <MemoMetricRow
                                     key={mk}
                                     label={<span><span style={{ color: atColor, fontSize: 11, marginRight: 6 }}>[{adType}]</span>{items[mk].label}</span>}
                                     items={items[mk].rows}
+                                    visibleGraphs={visibleGraphs}
+                                    checkWarning={checkWarning}
                                   />
                                 ))
                               )}
@@ -426,7 +440,7 @@ export default function Dashboard({ data, allowedBrands }) {
                         })}
 
                         {sortedAdTypes.length > 1 && (
-                          <MetricRow label={`${productName} 전체`} items={allProductRows} isTotal />
+                          <MemoMetricRow label={`${productName} 전체`} items={allProductRows} isTotal visibleGraphs={visibleGraphs} checkWarning={checkWarning} />
                         )}
                       </tbody>
                     </table>
@@ -447,24 +461,28 @@ export default function Dashboard({ data, allowedBrands }) {
       )}
 
       {/* 하단 전체 요약 */}
-      {hasData && hasMappings && (
-        <div style={{
-          background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginTop: 16,
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 14,
-        }}>
-          {(() => {
-            const mapByKey = {};
-            mappings.forEach(m => { mapByKey[m.match_key] = m; });
-            const all = filterByRange(adData, range).filter(row => {
-              const mapping = mapByKey[row.match_key];
-              if (!mapping) return false;
-              if (allowedBrands && !allowedBrands.includes(mapping.brand)) return false;
-              if (selectedBrand !== '전체' && mapping.brand !== selectedBrand) return false;
-              return true;
+      {hasData && hasMappings && (() => {
+        // structured에서 이미 필터링된 데이터를 재활용
+        const allRows = [];
+        const targetBrands = selectedBrand === '전체' ? allBrandNames : [selectedBrand];
+        targetBrands.forEach(bn => {
+          const products = structured.brands[bn];
+          if (!products) return;
+          Object.values(products).forEach(adTypes => {
+            Object.values(adTypes).forEach(items => {
+              Object.values(items).forEach(item => { allRows.push(...item.rows); });
             });
-            const m = sumMetrics(all);
-            const cpa = m.conversions > 0 ? Math.round(m.cost / m.conversions) : 0;
-            return [
+          });
+        });
+        if (allRows.length === 0) return null;
+        const m = sumMetrics(allRows);
+        const cpa = m.conversions > 0 ? Math.round(m.cost / m.conversions) : 0;
+        return (
+          <div style={{
+            background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginTop: 16,
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 14,
+          }}>
+            {[
               { label: '총 광고비', value: fmtWon(m.cost), color: C.warn },
               { label: '총 노출수', value: fmtNum(m.impressions), color: C.cyan },
               { label: '총 클릭수', value: fmtNum(m.clicks), color: C.ac },
@@ -476,18 +494,10 @@ export default function Dashboard({ data, allowedBrands }) {
                 <div style={{ fontSize: 11, color: C.txd, marginBottom: 3 }}>{s.label}</div>
                 <div style={{ fontSize: 18, fontWeight: 800, color: s.color }}>{s.value}</div>
               </div>
-            ));
-          })()}
-        </div>
-      )}
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
-
-// 스타일 상수
-const th = { padding: '9px 12px', textAlign: 'left', fontSize: 11, color: '#8890a6', fontWeight: 700, borderBottom: '1px solid #282d40', whiteSpace: 'nowrap' };
-const thR = { ...th, textAlign: 'right' };
-const thC = { ...th, textAlign: 'center' };
-const tdR = { padding: '8px 12px', borderBottom: '1px solid #282d40', fontSize: 12.5, textAlign: 'right', whiteSpace: 'nowrap' };
-const tdC = { padding: '6px 8px', borderBottom: '1px solid #282d40', textAlign: 'center', whiteSpace: 'nowrap' };
-const numInp = { background: '#1a1e2c', border: '1px solid #282d40', borderRadius: 6, padding: '4px 8px', color: '#e4e7ed', fontSize: 12, outline: 'none', width: 80, textAlign: 'right' };
