@@ -202,13 +202,33 @@ export default function Dashboard({ data, allowedBrands }) {
   const visibleGraphCount = Object.values(visibleGraphs).filter(Boolean).length;
   const tableMinWidth = 700 + visibleGraphCount * 160;
 
+  // 마지막 보고서 업로드 일시
+  const lastUploadDate = useMemo(() => {
+    if (adData.length === 0) return null;
+    let latest = '';
+    for (const item of adData) {
+      if (item.created_at && item.created_at > latest) latest = item.created_at;
+    }
+    if (!latest) return null;
+    const d = new Date(latest);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${day} ${h}:${min}`;
+  }, [adData]);
+
   return (
     <div>
       {/* 헤더 + 기간 선택 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>광고 성과 대시보드</h2>
-          <div style={{ fontSize: 12, color: C.txd, marginTop: 2 }}>모든 브랜드 · 모든 제품 · 모든 광고 한눈에</div>
+          <div style={{ fontSize: 12, color: C.txd, marginTop: 2 }}>
+            모든 브랜드 · 모든 제품 · 모든 광고 한눈에
+            {lastUploadDate && <span style={{ marginLeft: 12, color: C.txm, fontSize: 11 }}>마지막 업로드: {lastUploadDate}</span>}
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 3, background: C.sf, borderRadius: 10, padding: 3, border: `1px solid ${C.bd}` }}>
           {RANGES.map(r => (
