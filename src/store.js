@@ -126,26 +126,16 @@ export async function upsertAdData(items, onProgress) {
 
       if (onProgress) onProgress({ current: batchNum, total: totalBatches, rows: i + batch.length, totalRows: items.length });
 
-      // 1차 시도: owner_id 포함 (v4 인덱스)
-      let { data, error } = await sb
+      // owner_id 포함하여 upsert (v4 인덱스 필수)
+      // 보안: owner_id 없이 매칭하면 다른 사용자 데이터를 덮어쓸 수 있어 절대 사용하지 않음
+      const { data, error } = await sb
         .from('ad_data')
         .upsert(batch, { onConflict: 'date,match_key,owner_id', ignoreDuplicates: false })
         .select();
 
-      // 실패 시 2차 시도: owner_id 없이 (구 인덱스)
+      // 실패 시 개별 insert (덮어쓰기 없음 - 안전)
       if (error) {
-        console.warn(`[ad_data] 배치 ${batchNum} v4 upsert 실패, 구버전 시도:`, error.message);
-        const r2 = await sb
-          .from('ad_data')
-          .upsert(batch, { onConflict: 'date,match_key', ignoreDuplicates: false })
-          .select();
-        data = r2.data;
-        error = r2.error;
-      }
-
-      // 둘 다 실패 시 개별 insert
-      if (error) {
-        console.warn(`[ad_data] 배치 ${batchNum} upsert 모두 실패, 개별 insert:`, error.message);
+        console.warn(`[ad_data] 배치 ${batchNum} upsert 실패, 개별 insert:`, error.message);
         for (const item of batch) {
           const { error: e2 } = await sb.from('ad_data').insert(item);
           if (!e2) totalInserted++;
@@ -337,7 +327,16 @@ export function useStore(currentUser) {
   const isStaff = currentUser?.role === 'staff';
 
   // 범위별 데이터 로드 함수
+  // 직원: 본인 owner_id 데이터만
+  // 관리자: 전체 데이터
+  // 보안: currentUser가 없으면 절대 로드하지 않음 (격리 보장)
   const loadData = useCallback(async (rangeDays = 7) => {
+    // currentUser가 아직 설정되지 않았으면 로드하지 않음
+    if (!currentUser) {
+      setData({ adData: [], mappings: [] });
+      setLoading(false);
+      return;
+    }
     try {
       let adData, mappings;
       if (isStaff && ownerId) {
@@ -345,23 +344,34 @@ export function useStore(currentUser) {
           fetchAdDataByRangeAndOwner(rangeDays, ownerId),
           fetchByOwner('mappings', ownerId),
         ]);
-      } else {
+      } else if (isAdmin) {
+        // 관리자만 전체 데이터 조회 가능
         [adData, mappings] = await Promise.all([
           fetchAdDataByRange(rangeDays),
           fetchAll('mappings'),
         ]);
+      } else {
+        // 그 외 (역할 불명) → 빈 데이터 (보안)
+        adData = [];
+        mappings = [];
       }
       setData({ adData: adData || [], mappings: mappings || [] });
       setLoadedRange(rangeDays);
     } catch (e) { console.error('로드 실패:', e); }
     finally { setLoading(false); }
-  }, [isStaff, ownerId, isAdmin]);
+  }, [currentUser, isStaff, isAdmin, ownerId]);
 
-  // 초기 로드: 최근 7일만
+  // 초기 로드: currentUser가 설정된 후에만
   useEffect(() => {
+    if (!currentUser) {
+      // 로그인 전에는 빈 데이터 유지
+      setData({ adData: [], mappings: [] });
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     loadData(7);
-  }, [loadData]);
+  }, [currentUser, loadData]);
 
   // 기간 변경 시 호출 (Dashboard에서 호출)
   const changeRange = useCallback(async (newRange) => {
