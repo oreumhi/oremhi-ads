@@ -83,6 +83,20 @@ export default function Upload({ data, uploadAdData }) {
         · 파일 유형은 <b>자동 감지</b>됩니다
       </div>
 
+      {/* 양식 다운로드 */}
+      <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:14, padding:'12px 16px', background:C.sf, border:`1px solid ${C.bd}`, borderRadius:10 }}>
+        <span style={{ fontSize:13, color:C.txd, fontWeight:600, marginRight:4 }}>📋 양식 다운로드:</span>
+        <a href="/templates/sa_template.xlsx" download="SA_검색광고_양식.xlsx"
+          style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'7px 14px', background:C.ac+'18', border:`1px solid ${C.ac}55`, borderRadius:7, color:C.ac, fontSize:12, fontWeight:600, textDecoration:'none', cursor:'pointer' }}>
+          ⬇️ SA 양식
+        </a>
+        <a href="/templates/gfa_template.xlsx" download="GFA_양식.xlsx"
+          style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'7px 14px', background:C.ok+'18', border:`1px solid ${C.ok}55`, borderRadius:7, color:C.ok, fontSize:12, fontWeight:600, textDecoration:'none', cursor:'pointer' }}>
+          ⬇️ GFA 양식
+        </a>
+        <span style={{ fontSize:11, color:C.txm, marginLeft:'auto' }}>양식 파일을 받아 컬럼 형식을 확인하세요</span>
+      </div>
+
       {/* 업로드 영역 */}
       <div
         onClick={() => fileRef.current?.click()}
