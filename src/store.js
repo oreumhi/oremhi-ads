@@ -319,22 +319,18 @@ async function fetchAdDataByRangeAndOwner(rangeDays, ownerId) {
 
 export function useStore(currentUser) {
   const [data, setData] = useState({ adData: [], mappings: [] });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // 초기 로딩만 (전체 화면 로딩)
+  const [rangeLoading, setRangeLoading] = useState(false); // 기간 변경 로딩 (작은 인디케이터)
   const [loadedRange, setLoadedRange] = useState(0); // 현재 로드된 범위 (일수)
 
   const isAdmin = currentUser?.role === 'admin';
   const ownerId = currentUser?.id;
   const isStaff = currentUser?.role === 'staff';
 
-  // 범위별 데이터 로드 함수
-  // 직원: 본인 owner_id 데이터만
-  // 관리자: 전체 데이터
-  // 보안: currentUser가 없으면 절대 로드하지 않음 (격리 보장)
-  const loadData = useCallback(async (rangeDays = 7) => {
-    // currentUser가 아직 설정되지 않았으면 로드하지 않음
+  // 내부: setLoading을 건드리지 않는 순수 데이터 로드 함수
+  const loadDataInternal = useCallback(async (rangeDays = 7) => {
     if (!currentUser) {
       setData({ adData: [], mappings: [] });
-      setLoading(false);
       return;
     }
     try {
@@ -345,31 +341,41 @@ export function useStore(currentUser) {
           fetchByOwner('mappings', ownerId),
         ]);
       } else if (isAdmin) {
-        // 관리자만 전체 데이터 조회 가능
         [adData, mappings] = await Promise.all([
           fetchAdDataByRange(rangeDays),
           fetchAll('mappings'),
         ]);
       } else {
-        // 그 외 (역할 불명) → 빈 데이터 (보안)
         adData = [];
         mappings = [];
       }
       setData({ adData: adData || [], mappings: mappings || [] });
       setLoadedRange(rangeDays);
     } catch (e) { console.error('로드 실패:', e); }
-    finally { setLoading(false); }
   }, [currentUser, isStaff, isAdmin, ownerId]);
 
-  // 초기 로드: currentUser가 설정된 후에만
-  useEffect(() => {
+  // 외부용: 큰 로딩 표시 포함 (초기 로드 / 업로드 후 / 매핑 후)
+  const loadData = useCallback(async (rangeDays = 7) => {
     if (!currentUser) {
-      // 로그인 전에는 빈 데이터 유지
       setData({ adData: [], mappings: [] });
       setLoading(false);
       return;
     }
     setLoading(true);
+    try {
+      await loadDataInternal(rangeDays);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUser, loadDataInternal]);
+
+  // 초기 로드: currentUser가 설정된 후에만
+  useEffect(() => {
+    if (!currentUser) {
+      setData({ adData: [], mappings: [] });
+      setLoading(false);
+      return;
+    }
     loadData(7);
   }, [currentUser, loadData]);
 
@@ -379,9 +385,13 @@ export function useStore(currentUser) {
     // (0 = 전체, 양수 = 일수, 전체는 항상 재요청)
     if (newRange > 0 && loadedRange >= newRange && loadedRange > 0) return;
     if (newRange === 0 && loadedRange === 0) return;
-    setLoading(true);
-    await loadData(newRange);
-  }, [loadedRange, loadData]);
+    setRangeLoading(true); // 작은 인디케이터만 (전체 화면 로딩 X)
+    try {
+      await loadDataInternal(newRange);
+    } finally {
+      setRangeLoading(false);
+    }
+  }, [loadedRange]);
 
   // 광고 데이터 업로드 (owner_id 자동 태깅 + 배치 업로드)
   const uploadAdData = useCallback(async (items, onProgress) => {
@@ -449,5 +459,5 @@ export function useStore(currentUser) {
     await loadData(loadedRange || 7);
   }, [ownerId, loadData, loadedRange]);
 
-  return { data, loading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange };
+  return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange };
 }

@@ -16,13 +16,13 @@ import { Sparkline } from '../components/Sparkline';
 
 // ─── 그래프 설정 ───
 const GRAPH_OPTIONS = [
-  { key: 'impressions', label: '노출', color: '#45c8dc' },
-  { key: 'clicks',      label: '클릭', color: '#5b8def' },
-  { key: 'ctr',         label: '클릭률', color: '#f0c746' },
-  { key: 'conversions', label: '전환', color: '#3dd9a0' },
-  { key: 'cost',        label: '광고비', color: '#f5a445' },
-  { key: 'revenue',     label: '매출', color: '#ed6ea0' },
-  { key: 'roas',        label: 'ROAS', color: '#9d7ff0' },
+  { key: 'impressions', label: '노출', color: '#45c8dc', unit: '회' },
+  { key: 'clicks',      label: '클릭', color: '#5b8def', unit: '회' },
+  { key: 'ctr',         label: '클릭률', color: '#f0c746', unit: '%' },
+  { key: 'conversions', label: '전환', color: '#3dd9a0', unit: '건' },
+  { key: 'cost',        label: '광고비', color: '#f5a445', unit: '원' },
+  { key: 'revenue',     label: '매출', color: '#ed6ea0', unit: '원' },
+  { key: 'roas',        label: 'ROAS', color: '#9d7ff0', unit: '%' },
 ];
 
 // ─── 정렬 가능한 숫자 컬럼 ───
@@ -51,7 +51,7 @@ function getMetricValue(items, key) {
   }
 }
 
-export default function Dashboard({ data, allowedBrands, changeRange }) {
+export default function Dashboard({ data, allowedBrands, changeRange, rangeLoading }) {
   const { adData, mappings } = data;
   const [range, setRange] = useState(7);
   const [selectedBrand, setSelectedBrand] = useState('전체');
@@ -74,17 +74,17 @@ export default function Dashboard({ data, allowedBrands, changeRange }) {
     revenueEnabled: false, revenueThreshold: 100000,
   });
   const [showWarningPanel, setShowWarningPanel] = useState(false);
-  const [rangeLoading, setRangeLoading] = useState(false);
+
+  // ─── 차트 모달 (스파크라인 클릭) ───
+  const [chartModal, setChartModal] = useState(null); // { title, data, color, unit }
 
   const toggleExpand = (key) => { setExpanded(prev => ({ ...prev, [key]: !prev[key] })); };
 
-  // 기간 변경 시 서버에서 해당 기간 데이터 로드
+  // 기간 변경 시 서버에서 해당 기간 데이터 로드 (selectedBrand는 유지)
   const handleRangeChange = async (newRange) => {
     setRange(newRange);
     if (changeRange) {
-      setRangeLoading(true);
       await changeRange(newRange);
-      setRangeLoading(false);
     }
   };
 
@@ -145,8 +145,157 @@ const tdR = { padding: '8px 12px', borderBottom: '1px solid #282d40', fontSize: 
 const tdC = { padding: '6px 8px', borderBottom: '1px solid #282d40', textAlign: 'center', whiteSpace: 'nowrap' };
 const numInp = { background: '#1a1e2c', border: '1px solid #282d40', borderRadius: 6, padding: '4px 8px', color: '#e4e7ed', fontSize: 12, outline: 'none', width: 80, textAlign: 'right' };
 
+// ─── 큰 차트 모달 (스파크라인 클릭 시) ───
+function ChartModal({ chart, onClose }) {
+  const [hover, setHover] = React.useState(null);
+  if (!chart) return null;
+
+  const W = 880, H = 320;
+  const PAD = { top: 30, right: 30, bottom: 50, left: 70 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+
+  const data = chart.data || [];
+  const values = data.map(d => Number(d.value) || 0);
+
+  if (data.length === 0) {
+    return (
+      <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+        <div onClick={e => e.stopPropagation()} style={{ background:C.sf, borderRadius:14, padding:30, maxWidth:500 }}>
+          <div style={{ fontSize:14 }}>표시할 데이터가 없습니다.</div>
+        </div>
+      </div>
+    );
+  }
+
+  let min = values[0], max = values[0];
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] < min) min = values[i];
+    if (values[i] > max) max = values[i];
+  }
+  const range = max - min || 1;
+  // y축 padding (위/아래 여유)
+  const yPad = range * 0.1;
+  const yMin = Math.max(0, min - yPad);
+  const yMax = max + yPad;
+  const yRange = yMax - yMin || 1;
+
+  // 좌표 변환
+  const xPos = (i) => PAD.left + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW);
+  const yPos = (v) => PAD.top + innerH - ((v - yMin) / yRange) * innerH;
+
+  // 폴리라인 좌표
+  const points = data.map((d, i) => `${xPos(i)},${yPos(d.value)}`).join(' ');
+
+  // 평균
+  const avg = values.reduce((s, v) => s + v, 0) / values.length;
+  const avgY = yPos(avg);
+
+  // y축 눈금 (5개)
+  const yTicks = [];
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yRange * i / 4);
+    yTicks.push({ y: yPos(v), label: v });
+  }
+
+  // x축 눈금 (최대 8개로 제한, 너무 많으면 일부만 표시)
+  const xTickStep = Math.max(1, Math.ceil(data.length / 8));
+  const xTicks = data.map((d, i) => ({ i, date: d.date })).filter((_, i) => i % xTickStep === 0 || i === data.length - 1);
+
+  // 단위 포맷
+  const fmtVal = (v) => {
+    if (chart.unit === '원') return '₩' + Math.round(v).toLocaleString();
+    if (chart.unit === '%') return v.toFixed(2) + '%';
+    if (chart.unit === '회' || chart.unit === '건') return Math.round(v).toLocaleString();
+    return Math.round(v).toLocaleString();
+  };
+
+  return (
+    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:C.sf, borderRadius:14, border:`1px solid ${C.bd}`, padding:24, maxWidth:W+50, width:'100%' }}>
+        {/* 헤더 */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:18 }}>
+          <div>
+            <div style={{ fontSize:16, fontWeight:700, color:chart.color, marginBottom:4 }}>{chart.title}</div>
+            <div style={{ fontSize:11, color:C.txd, display:'flex', gap:14 }}>
+              <span>최솟값: <b style={{ color:C.tx }}>{fmtVal(min)}</b></span>
+              <span>최댓값: <b style={{ color:C.tx }}>{fmtVal(max)}</b></span>
+              <span>평균: <b style={{ color:C.tx }}>{fmtVal(avg)}</b></span>
+              <span>총 {data.length}일</span>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', fontSize:22, color:C.txd, cursor:'pointer' }}>✕</button>
+        </div>
+
+        {/* SVG 차트 */}
+        <svg width={W} height={H} style={{ display:'block', maxWidth:'100%' }}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * W;
+            // 가장 가까운 데이터 포인트 찾기
+            let best = -1, bestDist = Infinity;
+            for (let i = 0; i < data.length; i++) {
+              const d = Math.abs(xPos(i) - x);
+              if (d < bestDist) { bestDist = d; best = i; }
+            }
+            setHover(best);
+          }}
+          onMouseLeave={() => setHover(null)}>
+          {/* y축 격자 + 눈금 */}
+          {yTicks.map((t, i) => (
+            <g key={i}>
+              <line x1={PAD.left} y1={t.y} x2={W - PAD.right} y2={t.y} stroke={C.bd} strokeWidth="1" strokeDasharray={i === 0 || i === yTicks.length - 1 ? '0' : '3,3'} />
+              <text x={PAD.left - 8} y={t.y + 4} fontSize="10" fill={C.txm} textAnchor="end">{fmtVal(t.label)}</text>
+            </g>
+          ))}
+
+          {/* 평균선 */}
+          <line x1={PAD.left} y1={avgY} x2={W - PAD.right} y2={avgY} stroke={C.txm} strokeWidth="1" strokeDasharray="4,4" opacity="0.6" />
+          <text x={W - PAD.right - 4} y={avgY - 4} fontSize="10" fill={C.txm} textAnchor="end">평균</text>
+
+          {/* 폴리라인 */}
+          <polyline points={points} fill="none" stroke={chart.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* 데이터 점 */}
+          {data.map((d, i) => (
+            <circle key={i} cx={xPos(i)} cy={yPos(d.value)} r={hover === i ? 5 : 3} fill={chart.color} stroke="#fff" strokeWidth={hover === i ? 2 : 0} />
+          ))}
+
+          {/* x축 눈금 */}
+          {xTicks.map((t, i) => (
+            <text key={i} x={xPos(t.i)} y={H - PAD.bottom + 18} fontSize="10" fill={C.txm} textAnchor="middle">{(t.date || '').slice(5)}</text>
+          ))}
+
+          {/* 호버 툴팁 */}
+          {hover !== null && data[hover] && (() => {
+            const x = xPos(hover);
+            const y = yPos(data[hover].value);
+            const tooltipW = 130;
+            const flipL = x > W - tooltipW - 20;
+            const tx = flipL ? x - tooltipW - 10 : x + 10;
+            const ty = Math.max(PAD.top, y - 30);
+            return (
+              <g>
+                <line x1={x} y1={PAD.top} x2={x} y2={H - PAD.bottom} stroke={chart.color} strokeWidth="1" strokeDasharray="3,3" opacity="0.5" />
+                <rect x={tx} y={ty} width={tooltipW} height={42} rx={6} fill={C.sf3} stroke={chart.color} strokeWidth="1" />
+                <text x={tx + 8} y={ty + 16} fontSize="11" fill={C.txd}>{data[hover].date}</text>
+                <text x={tx + 8} y={ty + 33} fontSize="13" fill={chart.color} fontWeight="700">{fmtVal(data[hover].value)}</text>
+              </g>
+            );
+          })()}
+        </svg>
+
+        {/* 안내 */}
+        <div style={{ marginTop:10, fontSize:11, color:C.txm, textAlign:'center' }}>
+          그래프 위에서 마우스를 움직이면 날짜별 값을 볼 수 있습니다 · 바깥을 클릭하거나 ✕ 버튼으로 닫기
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 지표 행 렌더 (React.memo 최적화) ───
-const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, isTotal, onClick, clickable, visibleGraphs, checkWarning }) {
+const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, isTotal, onClick, clickable, visibleGraphs, checkWarning, onChartClick }) {
     const metrics = sumMetrics(items);
     const daily = aggregateByDate(items);
     const ctr = calcCtr(metrics.clicks, metrics.impressions);
@@ -161,15 +310,27 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
     const fw = isSubtotal || isTotal ? 700 : 400;
     const prefix = isTotal ? '▶▶ ' : isSubtotal ? '▶ ' : '';
 
-    // 그래프 데이터
+    // 그래프 데이터 (날짜와 값 함께 보관 - 모달용)
     const graphData = {
-      impressions: daily.map(d => d.impressions),
-      clicks: daily.map(d => d.clicks),
-      ctr: daily.map(d => d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0),
-      conversions: daily.map(d => d.conversions),
-      cost: daily.map(d => d.cost),
-      revenue: daily.map(d => d.conv_revenue),
-      roas: daily.map(d => d.cost > 0 ? (d.conv_revenue / d.cost) * 100 : 0),
+      impressions: daily.map(d => ({ date: d.date, value: d.impressions })),
+      clicks: daily.map(d => ({ date: d.date, value: d.clicks })),
+      ctr: daily.map(d => ({ date: d.date, value: d.impressions > 0 ? (d.clicks / d.impressions) * 100 : 0 })),
+      conversions: daily.map(d => ({ date: d.date, value: d.conversions })),
+      cost: daily.map(d => ({ date: d.date, value: d.cost })),
+      revenue: daily.map(d => ({ date: d.date, value: d.conv_revenue })),
+      roas: daily.map(d => ({ date: d.date, value: d.cost > 0 ? (d.conv_revenue / d.cost) * 100 : 0 })),
+    };
+
+    const handleSparkClick = (e, g) => {
+      e.stopPropagation(); // 행 onClick 방지
+      if (onChartClick) {
+        onChartClick({
+          title: `${typeof label === 'string' ? label : '항목'} - ${g.label}`,
+          color: g.color,
+          unit: g.unit,
+          data: graphData[g.key],
+        });
+      }
     };
 
     return (
@@ -187,7 +348,11 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
         <td style={{ ...tdR, color: cpa > 20000 ? C.no : cpa > 10000 ? C.warn : C.ok }}>{cpa > 0 ? fmtWon(cpa) : '-'}</td>
         <td style={{ ...tdR, color: Number(roas) >= 300 ? C.ok : Number(roas) < 100 ? C.no : C.tx }}>{roas}%</td>
         {GRAPH_OPTIONS.map(g => visibleGraphs[g.key] && (
-          <td key={g.key} style={tdC}><Sparkline data={graphData[g.key]} color={g.color} /></td>
+          <td key={g.key} style={tdC}>
+            <span onClick={(e) => handleSparkClick(e, g)} style={{ display:'inline-block', cursor:'pointer', borderRadius:4, padding:2 }} title="클릭하여 큰 그래프 보기">
+              <Sparkline data={graphData[g.key].map(d => d.value)} color={g.color} />
+            </span>
+          </td>
         ))}
       </tr>
     );
@@ -340,10 +505,17 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
         )}
       </div>
 
-      {/* 기간 변경 로딩 */}
+      {/* 기간 변경 로딩 - 작은 우상단 인디케이터 (화면 가리지 않음) */}
       {rangeLoading && (
-        <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 20, textAlign: 'center', marginBottom: 14 }}>
-          <div style={{ color: C.txd, fontSize: 13 }}>📊 기간 데이터를 불러오는 중...</div>
+        <div style={{
+          position: 'fixed', top: 14, right: 24, zIndex: 100,
+          background: C.ac, color: '#fff', padding: '8px 14px', borderRadius: 20,
+          fontSize: 12, fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #fff', borderRightColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+          데이터 불러오는 중...
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
       )}
 
@@ -431,6 +603,7 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
                                     onClick={() => toggleExpand(expandKey)}
                                     visibleGraphs={visibleGraphs}
                                     checkWarning={checkWarning}
+                                    onChartClick={setChartModal}
                                   />
                                   {isExpanded && sortedMKs.map(mk => (
                                     <MemoMetricRow
@@ -439,6 +612,7 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
                                       items={items[mk].rows}
                                       visibleGraphs={visibleGraphs}
                                       checkWarning={checkWarning}
+                                      onChartClick={setChartModal}
                                     />
                                   ))}
                                 </>
@@ -450,6 +624,7 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
                                     items={items[mk].rows}
                                     visibleGraphs={visibleGraphs}
                                     checkWarning={checkWarning}
+                                    onChartClick={setChartModal}
                                   />
                                 ))
                               )}
@@ -458,7 +633,7 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
                         })}
 
                         {sortedAdTypes.length > 1 && (
-                          <MemoMetricRow label={`${productName} 전체`} items={allProductRows} isTotal visibleGraphs={visibleGraphs} checkWarning={checkWarning} />
+                          <MemoMetricRow label={`${productName} 전체`} items={allProductRows} isTotal visibleGraphs={visibleGraphs} checkWarning={checkWarning} onChartClick={setChartModal} />
                         )}
                       </tbody>
                     </table>
@@ -516,6 +691,9 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
           </div>
         );
       })()}
+
+      {/* ─── 큰 차트 모달 ─── */}
+      <ChartModal chart={chartModal} onClose={() => setChartModal(null)} />
     </div>
   );
 }

@@ -147,7 +147,7 @@ function ShareAuth({ code, brandName, onAuth }) {
 }
 
 // ─── 공유 링크 뷰 (클라이언트용 - 대시보드만) ───
-function ShareView({ data, brand, changeRange }) {
+function ShareView({ data, brand, changeRange, rangeLoading }) {
   return (
     <div style={{ minHeight:'100vh', background:C.bg, color:C.tx, fontFamily:"'Noto Sans KR',-apple-system,sans-serif", fontSize:14 }}>
       <div style={{ padding:'14px 24px', borderBottom:`1px solid ${C.bd}`, background:C.sf, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
@@ -157,7 +157,7 @@ function ShareView({ data, brand, changeRange }) {
         </div>
       </div>
       <div style={{ padding:'20px 24px' }}>
-        <Dashboard data={data} allowedBrands={[brand]} changeRange={changeRange} />
+        <Dashboard data={data} allowedBrands={[brand]} changeRange={changeRange} rangeLoading={rangeLoading} />
       </div>
     </div>
   );
@@ -172,7 +172,7 @@ export default function App() {
   const [shareBrand, setShareBrand] = useState(null);
   const [tab, setTab] = useState('dashboard');
 
-  const { data, loading: dataLoading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange } = useStore(currentUser);
+  const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange } = useStore(currentUser);
 
   // ─── 초기화: URL 체크 → 사용자 확인 ───
   useEffect(() => {
@@ -287,7 +287,7 @@ export default function App() {
 
   // 공유 링크 - 대시보드 보기
   if (mode === 'share_view') {
-    return <ShareView data={data} brand={shareBrand} changeRange={changeRange} />;
+    return <ShareView data={data} brand={shareBrand} changeRange={changeRange} rangeLoading={rangeLoading} />;
   }
 
   // ─── 메인 앱 (로그인된 상태) ───
@@ -296,7 +296,7 @@ export default function App() {
 
   return (
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
-      {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} />}
+      {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
