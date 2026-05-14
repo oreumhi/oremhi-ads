@@ -376,7 +376,16 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
     </thead>
   );
 
-  const rawBrandNames = Object.keys(structured.brands).sort();
+  // 등록된 모든 브랜드 (매핑 기반)
+  // - 선택한 기간에 데이터가 없어도 브랜드 버튼은 항상 표시
+  // - 데이터가 없는 브랜드는 표 영역에 안내 메시지 표시
+  const allMappedBrands = useMemo(() => {
+    const set = new Set();
+    mappings.forEach(m => { if (m.brand) set.add(m.brand); });
+    return Array.from(set).sort();
+  }, [mappings]);
+
+  const rawBrandNames = allMappedBrands;
   const allBrandNames = allowedBrands ? rawBrandNames.filter(b => allowedBrands.includes(b)) : rawBrandNames;
   const brandNames = selectedBrand === '전체' ? allBrandNames : allBrandNames.filter(b => b === selectedBrand);
   const brandColors = ['#5b8def', '#3dd9a0', '#f5a445', '#ed6ea0', '#9d7ff0', '#45c8dc', '#f0c746'];
@@ -538,7 +547,8 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
       {/* ─── 브랜드별 펼쳐보기 ─── */}
       {brandNames.map((brandName, bi) => {
         const products = structured.brands[brandName];
-        const productNames = Object.keys(products).sort();
+        const hasDataInPeriod = products && Object.keys(products).length > 0;
+        const productNames = hasDataInPeriod ? Object.keys(products).sort() : [];
         const bColor = brandColors[allBrandNames.indexOf(brandName) % brandColors.length];
 
         return (
@@ -548,10 +558,23 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
               borderRadius: 12, padding: '12px 16px', marginBottom: 12,
             }}>
               <span style={{ fontSize: 17, fontWeight: 800, color: bColor }}>{brandName}</span>
-              <span style={{ fontSize: 12, color: C.txd, marginLeft: 10 }}>{productNames.length}개 제품</span>
+              <span style={{ fontSize: 12, color: C.txd, marginLeft: 10 }}>
+                {hasDataInPeriod ? `${productNames.length}개 제품` : '선택한 기간에 데이터 없음'}
+              </span>
             </div>
 
-            {productNames.map(productName => {
+            {/* 데이터 없을 때 안내 (브랜드 등록되어 있지만 기간 내 데이터 없음) */}
+            {!hasDataInPeriod && (
+              <div style={{
+                background: C.sf2, border: `1px dashed ${C.bd}`, borderRadius: 10,
+                padding: 20, marginBottom: 12, textAlign: 'center',
+                color: C.txm, fontSize: 12,
+              }}>
+                이 브랜드는 선택한 기간 내 광고 데이터가 없습니다. 기간을 늘리거나 보고서를 업로드해보세요.
+              </div>
+            )}
+
+            {hasDataInPeriod && productNames.map(productName => {
               const adTypes = products[productName];
               const sortedAdTypes = Object.keys(adTypes).sort((a, b) => {
                 const ai = AD_TYPE_ORDER.indexOf(a);
