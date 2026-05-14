@@ -445,15 +445,22 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
             color: selectedBrand === '전체' ? '#fff' : C.txd,
             border: `1px solid ${selectedBrand === '전체' ? C.ac : C.bd}`,
           }}>전체</button>
-          {allBrandNames.map((b, i) => (
-            <button key={b} onClick={() => setSelectedBrand(b)} style={{
-              padding: '6px 14px', borderRadius: 7, cursor: 'pointer', fontSize: 12,
-              fontWeight: selectedBrand === b ? 700 : 400,
-              background: selectedBrand === b ? brandColors[i % brandColors.length] + '22' : C.sf,
-              color: selectedBrand === b ? brandColors[i % brandColors.length] : C.txd,
-              border: `1px solid ${selectedBrand === b ? brandColors[i % brandColors.length] + '55' : C.bd}`,
-            }}>{b}</button>
-          ))}
+          {allBrandNames.map((b, i) => {
+            const bHasData = structured.brands[b] && Object.keys(structured.brands[b]).length > 0;
+            const isSelected = selectedBrand === b;
+            return (
+              <button key={b} onClick={() => setSelectedBrand(b)} style={{
+                padding: '6px 14px', borderRadius: 7, cursor: 'pointer', fontSize: 12,
+                fontWeight: isSelected ? 700 : 400,
+                background: isSelected ? brandColors[i % brandColors.length] + '22' : C.sf,
+                color: isSelected ? brandColors[i % brandColors.length] : (bHasData ? C.txd : C.txm),
+                border: `1px solid ${isSelected ? brandColors[i % brandColors.length] + '55' : C.bd}`,
+                opacity: bHasData ? 1 : 0.55,
+              }} title={bHasData ? '' : '선택한 기간에 데이터 없음'}>
+                {b}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -550,6 +557,10 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
         const hasDataInPeriod = products && Object.keys(products).length > 0;
         const productNames = hasDataInPeriod ? Object.keys(products).sort() : [];
         const bColor = brandColors[allBrandNames.indexOf(brandName) % brandColors.length];
+
+        // "전체" 보기에서는 데이터 없는 브랜드 카드 숨김 (화면 깔끔하게)
+        // 특정 브랜드를 직접 클릭한 경우에만 안내 메시지 표시
+        if (selectedBrand === '전체' && !hasDataInPeriod) return null;
 
         return (
           <div key={brandName} style={{ marginBottom: 24 }}>
