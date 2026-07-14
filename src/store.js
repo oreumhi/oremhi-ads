@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { uid } from './utils';
+import { uid, toLocalDateStr } from './utils';
 
 // ─── Supabase 설정 ───
 const url = import.meta.env.VITE_SUPABASE_URL;
@@ -178,6 +178,23 @@ export async function deleteMappingByKey(matchKey, ownerId) {
   } catch { return false; }
 }
 
+// ─── 브랜드 전체 삭제 (해당 브랜드의 매핑 일괄 삭제) ───
+// ownerId가 있으면(직원) 본인 매핑만, null이면(관리자) 전체 삭제
+export async function deleteMappingsByBrand(brand, ownerId) {
+  if (sb) {
+    let query = sb.from('mappings').delete().eq('brand', brand);
+    if (ownerId) query = query.eq('owner_id', ownerId);
+    const { error } = await query;
+    return !error;
+  }
+  try {
+    const items = JSON.parse(localStorage.getItem('oha_mappings') || '[]')
+      .filter(i => !(i.brand === brand && (!ownerId || i.owner_id === ownerId)));
+    localStorage.setItem('oha_mappings', JSON.stringify(items));
+    return true;
+  } catch { return false; }
+}
+
 // ═══════════════════════════════════════════
 // 사용자 관리
 // ═══════════════════════════════════════════
@@ -259,7 +276,7 @@ function getCutoffDate(rangeDays) {
   if (!rangeDays || rangeDays <= 0) return null; // 전체
   const d = new Date();
   d.setDate(d.getDate() - rangeDays);
-  return d.toISOString().slice(0, 10);
+  return toLocalDateStr(d); // 로컬(한국시간) 기준
 }
 
 async function fetchAdDataByRange(rangeDays) {
@@ -340,7 +357,9 @@ export function useStore(currentUser) {
           fetchAdDataByRangeAndOwner(rangeDays, ownerId),
           fetchByOwner('mappings', ownerId),
         ]);
-      } else if (isAdmin) {
+      } else if (isAdmin || currentUser.role === 'share') {
+        // 관리자 또는 공유 링크(클라이언트) 모드: 전체 로드
+        // 공유 모드는 Dashboard의 allowedBrands로 해당 브랜드만 표시됨
         [adData, mappings] = await Promise.all([
           fetchAdDataByRange(rangeDays),
           fetchAll('mappings'),
@@ -424,6 +443,18 @@ export function useStore(currentUser) {
     return false;
   }, [ownerId]);
 
+  // 브랜드 전체 삭제 (매핑 일괄 삭제 → 브랜드 버튼이 사라짐)
+  const removeBrand = useCallback(async (brand) => {
+    const ok = await deleteMappingsByBrand(brand, isAdmin ? null : ownerId);
+    if (ok) {
+      setData(prev => ({
+        ...prev,
+        mappings: prev.mappings.filter(m => !(m.brand === brand && (isAdmin || m.owner_id === ownerId))),
+      }));
+    }
+    return ok;
+  }, [isAdmin, ownerId]);
+
   // 광고 데이터 전체 삭제
   const clearAdData = useCallback(async () => {
     if (sb) {
@@ -459,5 +490,5 @@ export function useStore(currentUser) {
     await loadData(loadedRange || 7);
   }, [ownerId, loadData, loadedRange]);
 
-  return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange };
+  return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange };
 }
