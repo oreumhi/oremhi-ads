@@ -12,7 +12,7 @@ import { C, AD_TYPE_COLORS } from '../config';
 import { findUnmappedKeys } from '../parsers';
 import { labelFromMatchKey } from '../config';
 
-export default function Mapping({ data, addMapping, removeMapping, deleteAdDataByKeys, currentUser }) {
+export default function Mapping({ data, addMapping, removeMapping, removeBrand, deleteAdDataByKeys, currentUser }) {
   const { adData: allAdData, mappings: allMappings } = data;
 
   // ─── 데이터 격리: 현재 사용자의 데이터만 사용 ───
@@ -128,6 +128,14 @@ export default function Mapping({ data, addMapping, removeMapping, deleteAdDataB
     for (const m of mappings) {
       await removeMapping(m.match_key);
     }
+  };
+
+  // ─── 브랜드 전체 삭제 ───
+  // 데이터가 더 이상 없는(계약 종료 등) 브랜드를 목록에서 제거할 때 사용
+  const handleDeleteBrand = async (brandName, count) => {
+    if (!confirm(`"${brandName}" 브랜드의 매핑 ${count}개를 전부 삭제하시겠습니까?\n대시보드에서 이 브랜드 버튼이 사라집니다.\n(광고 데이터 자체는 삭제되지 않습니다)`)) return;
+    if (!confirm(`정말로 "${brandName}" 브랜드를 삭제하시겠습니까?`)) return;
+    await removeBrand(brandName);
   };
 
   // ─── 미매핑 데이터 삭제 ───
@@ -266,7 +274,13 @@ export default function Mapping({ data, addMapping, removeMapping, deleteAdDataB
 
           {Object.entries(mappedByBrand).sort().map(([brandName, products]) => (
             <div key={brandName} style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.ac, marginBottom: 6 }}>{brandName}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.ac }}>{brandName}</div>
+                <button onClick={() => handleDeleteBrand(brandName, Object.values(products).flat().length)}
+                  style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '2px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
+                  브랜드 삭제
+                </button>
+              </div>
 
               {Object.entries(products).sort().map(([productName, items]) => {
                 // 광고유형별 그룹핑
