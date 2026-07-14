@@ -18,6 +18,7 @@ export const TABS = [
   { id: 'dashboard', label: '성과 보기', icon: '📊' },
   { id: 'upload',    label: '보고서 업로드', icon: '📤' },
   { id: 'mapping',   label: '매핑 관리', icon: '🔗' },
+  { id: 'chat',      label: '대화 분석', icon: '💬' },
   { id: 'settings',  label: '설정', icon: '⚙️' },
 ];
 

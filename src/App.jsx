@@ -21,6 +21,7 @@ import { Layout } from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Upload from './pages/Upload';
 import Mapping from './pages/Mapping';
+import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
 
 // ─── 로딩 화면 ───
@@ -299,6 +300,7 @@ export default function App() {
       {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
+      {tab === 'chat' && <Conversations currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );
