@@ -2,7 +2,7 @@
 // 대화 분석 페이지
 //
 // 직원(staff): 카톡 내보내기 파일 업로드 + 본인 점수/캘린더 확인
-// 관리자(admin): 업로드 현황판 + 전체 점수 + 전체 캘린더 + 원문 열람
+// 관리자(admin): 업로드(담당 직원 지정 가능) + 현황판 + 전체 점수 + 전체 캘린더 + 원문 열람
 //
 // 분석 흐름: 업로드 → '대기' 상태로 저장 → 클로드가 분석 후
 //           chat_scores/chat_daily_notes에 결과 기록 + 상태 '완료'로 변경
@@ -22,6 +22,7 @@ const th = { textAlign: 'left', padding: '8px 10px', fontSize: 12, color: C.txd,
 const td = { padding: '8px 10px', fontSize: 13, borderBottom: `1px solid ${C.bd}22` };
 const btn = { background: C.ac, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', cursor: 'pointer', fontWeight: 600, fontSize: 13 };
 const btnGhost = { background: 'none', border: `1px solid ${C.bd}`, borderRadius: 6, padding: '4px 10px', color: C.txd, cursor: 'pointer', fontSize: 11 };
+const selStyle = { background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, color: C.tx, fontSize: 12, padding: '5px 8px' };
 
 const addDays = (dateStr, n) => {
   const d = new Date(dateStr + 'T00:00:00');
@@ -104,6 +105,113 @@ function ScoreTable({ scores, showStaff }) {
   );
 }
 
+// ─── 업로드 섹션 (직원·대표 공용) ───
+// 대표(admin)는 파일마다 "담당 직원"을 지정할 수 있음 (기본값: 본인)
+function UploadSection({ currentUser, isAdmin, staff, onDone }) {
+  const [pending, setPending] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const people = isAdmin ? [currentUser, ...(staff || [])] : [currentUser];
+
+  // 파일 선택 → 파싱
+  const onFiles = async (fileList) => {
+    setMsg('');
+    const items = [];
+    for (const f of Array.from(fileList)) {
+      if (!f.name.endsWith('.txt')) { setMsg(`"${f.name}" — 카톡 내보내기 .txt 파일만 올릴 수 있습니다`); continue; }
+      const text = await f.text();
+      const p = parseKakaoExport(text);
+      if (!p.valid) { setMsg(`"${f.name}" — 카톡 내보내기 파일이 아니거나 형식을 읽을 수 없습니다`); continue; }
+      items.push({
+        fileName: f.name, content: text,
+        roomName: p.roomName, clientName: guessClientName(p.roomName),
+        msgCount: p.msgCount, firstDate: p.firstDate, lastDate: p.lastDate,
+        assignId: currentUser.id,
+      });
+    }
+    setPending(prev => [...prev, ...items]);
+  };
+
+  // 업로드 확정 (담당자 기준으로 이전 업로드와 중복 기간 자동 계산)
+  const confirm = async () => {
+    setBusy(true);
+    let ok = 0;
+    for (const it of pending) {
+      const person = people.find(u => u.id === it.assignId) || currentUser;
+      const prev = await findPrevUpload(person.id, it.roomName);
+      const newFrom = prev && prev.last_date ? addDays(prev.last_date, 1) : it.firstDate;
+      const r = await insertChatUpload({
+        owner_id: person.id,
+        uploader_name: person.name,
+        room_name: it.roomName,
+        client_name: it.clientName.trim() || it.roomName,
+        file_name: it.fileName,
+        content: it.content,
+        msg_count: it.msgCount,
+        first_date: it.firstDate,
+        last_date: it.lastDate,
+        new_from: newFrom,
+        status: '대기',
+      });
+      if (r) ok++;
+    }
+    setBusy(false); setPending([]);
+    setMsg(`${ok}개 업로드 완료! 분석이 끝나면 점수가 표시됩니다.`);
+    if (onDone) onDone();
+  };
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>💬 광고주 대화 업로드</div>
+      <div style={{ fontSize: 12, color: C.txd, marginBottom: 12, lineHeight: 1.7 }}>
+        카카오톡 광고주 방에서 <b style={{ color: C.tx }}>대화 내용 내보내기(텍스트만)</b>로 저장한 .txt 파일을 올려주세요.
+        여러 파일을 한 번에 올릴 수 있고, 광고주·기간은 자동으로 인식됩니다.
+        {isAdmin && ' 파일마다 담당 직원을 지정할 수 있습니다.'}
+      </div>
+      <label style={{ ...btn, display: 'inline-block' }}>
+        파일 선택
+        <input type="file" accept=".txt" multiple style={{ display: 'none' }}
+          onChange={e => { onFiles(e.target.files); e.target.value = ''; }} />
+      </label>
+      {msg && <div style={{ marginTop: 10, fontSize: 13, color: msg.includes('완료') ? C.ok : C.no }}>{msg}</div>}
+
+      {/* 파싱 결과 확인 */}
+      {pending.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          {pending.map((it, i) => (
+            <div key={i} style={{ background: C.sf2, borderRadius: 8, padding: 12, marginBottom: 8, fontSize: 13 }}>
+              <div style={{ fontWeight: 600 }}>{it.roomName} <span style={{ color: C.txm, fontSize: 11 }}>({it.fileName})</span></div>
+              <div style={{ color: C.txd, fontSize: 12, margin: '4px 0' }}>
+                메시지 {it.msgCount.toLocaleString()}개 · {it.firstDate} ~ {it.lastDate}
+                <span style={{ color: C.ok }}> · 이전에 올린 기간과 겹치면 자동 제외됩니다</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: C.txd }}>광고주명</span>
+                <input value={it.clientName}
+                  onChange={e => setPending(p => p.map((x, j) => j === i ? { ...x, clientName: e.target.value } : x))}
+                  style={{ background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '5px 8px', color: C.tx, fontSize: 13, width: 160 }} />
+                {isAdmin && <>
+                  <span style={{ fontSize: 12, color: C.txd }}>담당 직원</span>
+                  <select value={it.assignId}
+                    onChange={e => setPending(p => p.map((x, j) => j === i ? { ...x, assignId: e.target.value } : x))}
+                    style={selStyle}>
+                    {people.map(u => <option key={u.id} value={u.id}>{u.name}{u.id === currentUser.id ? ' (나)' : ''}</option>)}
+                  </select>
+                </>}
+                <button style={btnGhost} onClick={() => setPending(p => p.filter((_, j) => j !== i))}>제외</button>
+              </div>
+            </div>
+          ))}
+          <button style={{ ...btn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={confirm}>
+            {busy ? '업로드 중...' : `${pending.length}개 파일 업로드 확정`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── 대화 캘린더 ───
 // 메모 유형별 색: 제안(초록) 질문(파랑) 요청(보라) 보고(회색) 미흡(빨강) 기타(노랑)
 const KIND_COLOR = { '제안': C.ok, '질문': C.ac, '요청': C.pur, '보고': C.txd, '미흡': C.no, '기타': C.yel };
@@ -182,8 +290,7 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
         <div style={{ fontSize: 14, fontWeight: 700 }}>📅 대화 캘린더</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {isAdmin && (
-            <select value={selStaff} onChange={e => setSelStaff(e.target.value)}
-              style={{ background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, color: C.tx, fontSize: 12, padding: '5px 8px' }}>
+            <select value={selStaff} onChange={e => setSelStaff(e.target.value)} style={selStyle}>
               <option value="all">전체 직원</option>
               {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
@@ -259,13 +366,10 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
   );
 }
 
-// ─── 직원용: 업로드 화면 ───
+// ─── 직원용 화면 ───
 function StaffView({ currentUser }) {
   const [uploads, setUploads] = useState([]);
   const [scores, setScores] = useState([]);
-  const [pending, setPending] = useState([]);   // 파싱 완료, 업로드 확정 전
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
     const [u, s] = await Promise.all([
@@ -277,93 +381,9 @@ function StaffView({ currentUser }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // 파일 선택 → 파싱
-  const onFiles = async (fileList) => {
-    setMsg('');
-    const items = [];
-    for (const f of Array.from(fileList)) {
-      if (!f.name.endsWith('.txt')) { setMsg(`"${f.name}" — 카톡 내보내기 .txt 파일만 올릴 수 있습니다`); continue; }
-      const text = await f.text();
-      const p = parseKakaoExport(text);
-      if (!p.valid) { setMsg(`"${f.name}" — 카톡 내보내기 파일이 아니거나 형식을 읽을 수 없습니다`); continue; }
-      const prev = await findPrevUpload(currentUser.id, p.roomName);
-      const newFrom = prev && prev.last_date ? addDays(prev.last_date, 1) : p.firstDate;
-      items.push({
-        fileName: f.name, content: text,
-        roomName: p.roomName, clientName: guessClientName(p.roomName),
-        msgCount: p.msgCount, firstDate: p.firstDate, lastDate: p.lastDate, newFrom,
-        prevLast: prev?.last_date || null,
-      });
-    }
-    setPending(prev => [...prev, ...items]);
-  };
-
-  // 업로드 확정
-  const confirm = async () => {
-    setBusy(true);
-    let ok = 0;
-    for (const it of pending) {
-      const r = await insertChatUpload({
-        owner_id: currentUser.id,
-        uploader_name: currentUser.name,
-        room_name: it.roomName,
-        client_name: it.clientName.trim() || it.roomName,
-        file_name: it.fileName,
-        content: it.content,
-        msg_count: it.msgCount,
-        first_date: it.firstDate,
-        last_date: it.lastDate,
-        new_from: it.newFrom,
-        status: '대기',
-      });
-      if (r) ok++;
-    }
-    setBusy(false); setPending([]);
-    setMsg(`${ok}개 업로드 완료! 분석이 끝나면 아래에 점수가 표시됩니다.`);
-    load();
-  };
-
   return (
     <div>
-      {/* 업로드 */}
-      <div style={card}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>💬 광고주 대화 업로드</div>
-        <div style={{ fontSize: 12, color: C.txd, marginBottom: 12, lineHeight: 1.7 }}>
-          카카오톡 광고주 방에서 <b style={{ color: C.tx }}>대화 내용 내보내기(텍스트만)</b>로 저장한 .txt 파일을 올려주세요.
-          여러 파일을 한 번에 올릴 수 있고, 광고주·기간은 자동으로 인식됩니다.
-        </div>
-        <label style={{ ...btn, display: 'inline-block' }}>
-          파일 선택
-          <input type="file" accept=".txt" multiple style={{ display: 'none' }}
-            onChange={e => { onFiles(e.target.files); e.target.value = ''; }} />
-        </label>
-        {msg && <div style={{ marginTop: 10, fontSize: 13, color: msg.includes('완료') ? C.ok : C.no }}>{msg}</div>}
-
-        {/* 파싱 결과 확인 */}
-        {pending.length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            {pending.map((it, i) => (
-              <div key={i} style={{ background: C.sf2, borderRadius: 8, padding: 12, marginBottom: 8, fontSize: 13 }}>
-                <div style={{ fontWeight: 600 }}>{it.roomName} <span style={{ color: C.txm, fontSize: 11 }}>({it.fileName})</span></div>
-                <div style={{ color: C.txd, fontSize: 12, margin: '4px 0' }}>
-                  메시지 {it.msgCount.toLocaleString()}개 · {it.firstDate} ~ {it.lastDate}
-                  {it.prevLast && <span style={{ color: C.ok }}> · 이번 분석: {it.newFrom}부터 (이전 업로드와 중복 자동 제외)</span>}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: C.txd }}>광고주명</span>
-                  <input value={it.clientName}
-                    onChange={e => setPending(p => p.map((x, j) => j === i ? { ...x, clientName: e.target.value } : x))}
-                    style={{ background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '5px 8px', color: C.tx, fontSize: 13, width: 160 }} />
-                  <button style={btnGhost} onClick={() => setPending(p => p.filter((_, j) => j !== i))}>제외</button>
-                </div>
-              </div>
-            ))}
-            <button style={{ ...btn, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={confirm}>
-              {busy ? '업로드 중...' : `${pending.length}개 파일 업로드 확정`}
-            </button>
-          </div>
-        )}
-      </div>
+      <UploadSection currentUser={currentUser} isAdmin={false} onDone={load} />
 
       {/* 내 대화 캘린더 */}
       <CalendarSection isAdmin={false} ownerId={currentUser.id} uploads={uploads} />
@@ -398,7 +418,7 @@ function StaffView({ currentUser }) {
 }
 
 // ─── 관리자용: 현황판 ───
-function AdminView() {
+function AdminView({ currentUser }) {
   const [uploads, setUploads] = useState([]);
   const [scores, setScores] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -442,6 +462,9 @@ function AdminView() {
         <SummaryCard label="분석 대기" value={`${waiting.length}건`} color={waiting.length > 0 ? C.warn : C.ok} />
         <SummaryCard label="누적 분석" value={`${scores.length}건`} color={C.pur} />
       </div>
+
+      {/* 대표도 업로드 가능 (담당 직원 지정) */}
+      <UploadSection currentUser={currentUser} isAdmin={true} staff={staff} onDone={load} />
 
       {/* 직원별 제출 현황 */}
       <div style={card}>
@@ -532,9 +555,9 @@ export default function Conversations({ currentUser }) {
     <div>
       <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>대화 분석</div>
       <div style={{ fontSize: 12, color: C.txd, marginBottom: 16 }}>
-        {isAdmin ? '직원들의 광고주 대화 품질을 확인합니다' : '광고주 카톡 대화를 올리면 대화 품질 점수를 받아볼 수 있습니다'}
+        {isAdmin ? '대화 업로드와 직원들의 광고주 대화 품질을 확인합니다' : '광고주 카톡 대화를 올리면 대화 품질 점수를 받아볼 수 있습니다'}
       </div>
-      {isAdmin ? <AdminView /> : <StaffView currentUser={currentUser} />}
+      {isAdmin ? <AdminView currentUser={currentUser} /> : <StaffView currentUser={currentUser} />}
     </div>
   );
 }
