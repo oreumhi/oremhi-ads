@@ -12,6 +12,13 @@
 // ============================================
 
 import Papa from 'papaparse';
+
+// 쉼표가 포함된 숫자도 안전하게 파싱 ("1,234" → 1234)
+// parseInt("1,234")는 1로 잘리는 버그를 방지
+const num = (v) => {
+  const n = parseFloat(String(v ?? '').replace(/,/g, '').replace(/원|₩|%/g, ''));
+  return isNaN(n) ? 0 : n;
+};
 import { parseNaverDate, uid } from './utils';
 import { classifySearchAdType, classifyGfaAdType, makeMatchKey, labelFromMatchKey } from './config';
 
@@ -174,11 +181,11 @@ function parseSearchAd(rows, hasTitleRow = true) {
       material_id: materialId,
       material_name: (row[col.materialType] || '').trim(),
       match_key: matchKey,
-      impressions: parseInt(row[col.impressions]) || 0,
-      clicks: parseInt(row[col.clicks]) || 0,
-      cost: parseFloat(row[col.cost]) || 0,
-      conversions: parseInt(row[col.conversions]) || 0,
-      conv_revenue: parseFloat(row[col.convRevenue]) || 0,
+      impressions: num(row[col.impressions]),
+      clicks: num(row[col.clicks]),
+      cost: num(row[col.cost]),
+      conversions: num(row[col.conversions]),
+      conv_revenue: num(row[col.convRevenue]),
     });
   }
 
@@ -250,11 +257,11 @@ function parseGfa(rows) {
       material_id: null,
       material_name: null,
       match_key: matchKey,
-      impressions: parseInt(row[col.impressions]) || 0,
-      clicks: parseInt(row[col.clicks]) || 0,
-      cost: parseFloat(row[col.cost]) || 0,
-      conversions: parseInt(row[col.conversions]) || 0,
-      conv_revenue: parseFloat(row[col.convRevenue]) || 0,
+      impressions: num(row[col.impressions]),
+      clicks: num(row[col.clicks]),
+      cost: num(row[col.cost]),
+      conversions: num(row[col.conversions]),
+      conv_revenue: num(row[col.convRevenue]),
     });
   }
 
