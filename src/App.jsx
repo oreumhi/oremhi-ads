@@ -19,6 +19,7 @@ import { useStore, fetchUsers, createUser, authenticateUser, findShareLinkByCode
 import { Layout } from './components/Layout';
 
 import Dashboard from './pages/Dashboard';
+import Overview from './pages/Overview';
 import Upload from './pages/Upload';
 import Mapping from './pages/Mapping';
 import Conversations from './pages/Conversations';
@@ -173,7 +174,7 @@ export default function App() {
   const [shareBrand, setShareBrand] = useState(null);
   const [tab, setTab] = useState('dashboard');
 
-  const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, clearAdData, deleteAdDataByKeys, changeRange } = useStore(currentUser);
+  const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange } = useStore(currentUser);
 
   // ─── 초기화: URL 체크 → 사용자 확인 ───
   useEffect(() => {
@@ -244,6 +245,8 @@ export default function App() {
   // ─── 공유 링크 인증 성공 ───
   const handleShareAuth = (brand) => {
     setShareBrand(brand);
+    // 공유 모드 유저 설정 → useStore가 데이터를 로드함 (이게 없으면 빈 화면)
+    setCurrentUser({ id: null, role: 'share', name: '클라이언트' });
     setMode('share_view');
   };
 
@@ -298,8 +301,9 @@ export default function App() {
   return (
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
       {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
+      {tab === 'overview' && <Overview data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
-      {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
+      {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} removeBrand={removeBrand} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'chat' && <Conversations currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
