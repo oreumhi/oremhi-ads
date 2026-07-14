@@ -51,92 +51,8 @@ function getMetricValue(items, key) {
   }
 }
 
-export default function Dashboard({ data, allowedBrands, changeRange, rangeLoading }) {
-  const { adData, mappings } = data;
-  const [range, setRange] = useState(7);
-  const [selectedBrand, setSelectedBrand] = useState('전체');
-  const [expanded, setExpanded] = useState({});
-
-  // ─── 정렬 상태 (#1) ───
-  const [sortKey, setSortKey] = useState(null);
-  const [sortDir, setSortDir] = useState('desc');
-
-  // ─── 그래프 필터 상태 (#2) ───
-  const [visibleGraphs, setVisibleGraphs] = useState({
-    impressions: true, clicks: true, ctr: true, conversions: true,
-    cost: true, revenue: true, roas: true,
-  });
-
-  // ─── 경고 조건 상태 (#4) ───
-  const [warningConfig, setWarningConfig] = useState({
-    roasEnabled: true, roasThreshold: 100,
-    costEnabled: true, costThreshold: 50000,
-    revenueEnabled: false, revenueThreshold: 100000,
-  });
-  const [showWarningPanel, setShowWarningPanel] = useState(false);
-
-  // ─── 차트 모달 (스파크라인 클릭) ───
-  const [chartModal, setChartModal] = useState(null); // { title, data, color, unit }
-
-  const toggleExpand = (key) => { setExpanded(prev => ({ ...prev, [key]: !prev[key] })); };
-
-  // 기간 변경 시 서버에서 해당 기간 데이터 로드 (selectedBrand는 유지)
-  const handleRangeChange = async (newRange) => {
-    setRange(newRange);
-    if (changeRange) {
-      await changeRange(newRange);
-    }
-  };
-
-  const handleSort = (key) => {
-    if (sortKey === key) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
-    else { setSortKey(key); setSortDir('desc'); }
-  };
-
-  const toggleGraph = (key) => {
-    setVisibleGraphs(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  // ─── 경고 체크 함수 ───
-  function checkWarning(metrics) {
-    const conditions = [];
-    if (warningConfig.roasEnabled) {
-      const roas = metrics.cost > 0 ? (metrics.conv_revenue / metrics.cost) * 100 : 0;
-      conditions.push(roas < warningConfig.roasThreshold);
-    }
-    if (warningConfig.costEnabled) {
-      conditions.push(metrics.cost >= warningConfig.costThreshold);
-    }
-    if (warningConfig.revenueEnabled) {
-      conditions.push(metrics.conv_revenue < warningConfig.revenueThreshold);
-    }
-    if (conditions.length === 0) return false;
-    return conditions.every(c => c);
-  }
-
-  // ─── 데이터 구조화 ───
-  const structured = useMemo(() => {
-    const mapByKey = {};
-    mappings.forEach(m => { mapByKey[m.match_key] = m; });
-    const filtered = filterByRange(adData, range);
-    const brands = {};
-    const unmapped = [];
-    filtered.forEach(row => {
-      const mapping = mapByKey[row.match_key];
-      if (!mapping) { unmapped.push(row); return; }
-      const { brand, product, ad_type: rawAdType, label } = mapping;
-      const ad_type = rawAdType.startsWith('GFA') ? 'GFA' : rawAdType;
-      if (!brands[brand]) brands[brand] = {};
-      if (!brands[brand][product]) brands[brand][product] = {};
-      if (!brands[brand][product][ad_type]) brands[brand][product][ad_type] = {};
-      if (!brands[brand][product][ad_type][row.match_key]) {
-        brands[brand][product][ad_type][row.match_key] = { label: label || row.group_name || row.material_id || '-', rows: [] };
-      }
-      brands[brand][product][ad_type][row.match_key].rows.push(row);
-    });
-    return { brands, unmapped };
-  }, [adData, mappings, range]);
-
+// ─── (성능 수정) 아래 컴포넌트들은 Dashboard 바깥에 정의 ───
+// 컴포넌트 안에 정의하면 렌더링마다 새로 만들어져 memo가 무효화됨
 // 스타일 상수
 const th = { padding: '9px 12px', textAlign: 'left', fontSize: 11, color: '#8890a6', fontWeight: 700, borderBottom: '1px solid #282d40', whiteSpace: 'nowrap' };
 const thR = { ...th, textAlign: 'right' };
@@ -357,6 +273,93 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
       </tr>
     );
   });
+
+
+export default function Dashboard({ data, allowedBrands, changeRange, rangeLoading }) {
+  const { adData, mappings } = data;
+  const [range, setRange] = useState(7);
+  const [selectedBrand, setSelectedBrand] = useState('전체');
+  const [expanded, setExpanded] = useState({});
+
+  // ─── 정렬 상태 (#1) ───
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState('desc');
+
+  // ─── 그래프 필터 상태 (#2) ───
+  const [visibleGraphs, setVisibleGraphs] = useState({
+    impressions: true, clicks: true, ctr: true, conversions: true,
+    cost: true, revenue: true, roas: true,
+  });
+
+  // ─── 경고 조건 상태 (#4) ───
+  const [warningConfig, setWarningConfig] = useState({
+    roasEnabled: true, roasThreshold: 100,
+    costEnabled: true, costThreshold: 50000,
+    revenueEnabled: false, revenueThreshold: 100000,
+  });
+  const [showWarningPanel, setShowWarningPanel] = useState(false);
+
+  // ─── 차트 모달 (스파크라인 클릭) ───
+  const [chartModal, setChartModal] = useState(null); // { title, data, color, unit }
+
+  const toggleExpand = (key) => { setExpanded(prev => ({ ...prev, [key]: !prev[key] })); };
+
+  // 기간 변경 시 서버에서 해당 기간 데이터 로드 (selectedBrand는 유지)
+  const handleRangeChange = async (newRange) => {
+    setRange(newRange);
+    if (changeRange) {
+      await changeRange(newRange);
+    }
+  };
+
+  const handleSort = (key) => {
+    if (sortKey === key) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const toggleGraph = (key) => {
+    setVisibleGraphs(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // ─── 경고 체크 함수 ───
+  function checkWarning(metrics) {
+    const conditions = [];
+    if (warningConfig.roasEnabled) {
+      const roas = metrics.cost > 0 ? (metrics.conv_revenue / metrics.cost) * 100 : 0;
+      conditions.push(roas < warningConfig.roasThreshold);
+    }
+    if (warningConfig.costEnabled) {
+      conditions.push(metrics.cost >= warningConfig.costThreshold);
+    }
+    if (warningConfig.revenueEnabled) {
+      conditions.push(metrics.conv_revenue < warningConfig.revenueThreshold);
+    }
+    if (conditions.length === 0) return false;
+    return conditions.every(c => c);
+  }
+
+  // ─── 데이터 구조화 ───
+  const structured = useMemo(() => {
+    const mapByKey = {};
+    mappings.forEach(m => { mapByKey[m.match_key] = m; });
+    const filtered = filterByRange(adData, range);
+    const brands = {};
+    const unmapped = [];
+    filtered.forEach(row => {
+      const mapping = mapByKey[row.match_key];
+      if (!mapping) { unmapped.push(row); return; }
+      const { brand, product, ad_type: rawAdType, label } = mapping;
+      const ad_type = rawAdType.startsWith('GFA') ? 'GFA' : rawAdType;
+      if (!brands[brand]) brands[brand] = {};
+      if (!brands[brand][product]) brands[brand][product] = {};
+      if (!brands[brand][product][ad_type]) brands[brand][product][ad_type] = {};
+      if (!brands[brand][product][ad_type][row.match_key]) {
+        brands[brand][product][ad_type][row.match_key] = { label: label || row.group_name || row.material_id || '-', rows: [] };
+      }
+      brands[brand][product][ad_type][row.match_key].rows.push(row);
+    });
+    return { brands, unmapped };
+  }, [adData, mappings, range]);
 
   // ─── 테이블 헤더 (정렬 클릭 + 그래프 필터) ───
   const Header = () => (
