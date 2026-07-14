@@ -20,8 +20,16 @@ export const fmtNum = n => {
   return v.toLocaleString('ko-KR');
 };
 
-// 오늘 날짜
-export const today = () => new Date().toISOString().slice(0, 10);
+// 로컬(한국시간) 기준 YYYY-MM-DD 변환
+export const toLocalDateStr = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+// 오늘 날짜 (로컬 기준 - UTC 사용 시 새벽 0~9시에 하루 어긋나는 문제 방지)
+export const today = () => toLocalDateStr(new Date());
 
 // ID 생성
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -46,7 +54,7 @@ export function filterByRange(items, rangeDays, dateField = 'date') {
 
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - rangeDays);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = toLocalDateStr(cutoff);
 
   return items.filter(item => item[dateField] >= cutoffStr);
 }
