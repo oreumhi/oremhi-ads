@@ -122,6 +122,16 @@ export async function fetchChatScores(ownerId) {
   return data || [];
 }
 
+// 캘린더 메모 조회 (최근 fromDate 이후, 직원이면 본인 것만)
+export async function fetchChatNotes(ownerId, fromDate) {
+  if (!sb) return [];
+  let q = sb.from('chat_daily_notes').select('*').gte('date', fromDate).order('date', { ascending: true }).limit(2000);
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
+  if (error) { console.error('[chat_daily_notes] 조회:', error.message); return []; }
+  return data || [];
+}
+
 // 관리자: 대화 원문 보기
 export async function fetchChatContent(uploadId) {
   if (!sb) return '';

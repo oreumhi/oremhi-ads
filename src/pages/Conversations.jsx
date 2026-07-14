@@ -1,11 +1,11 @@
 // ============================================
 // 대화 분석 페이지
 //
-// 직원(staff): 카톡 내보내기 파일 업로드 + 본인 점수 확인
-// 관리자(admin): 업로드 현황판 + 전체 점수 + 원문 열람
+// 직원(staff): 카톡 내보내기 파일 업로드 + 본인 점수/캘린더 확인
+// 관리자(admin): 업로드 현황판 + 전체 점수 + 전체 캘린더 + 원문 열람
 //
 // 분석 흐름: 업로드 → '대기' 상태로 저장 → 클로드가 분석 후
-//           chat_scores에 결과 기록 + 상태 '완료'로 변경
+//           chat_scores/chat_daily_notes에 결과 기록 + 상태 '완료'로 변경
 // ============================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -14,7 +14,7 @@ import { fetchUsers } from '../store';
 import {
   parseKakaoExport, guessClientName,
   fetchChatUploads, findPrevUpload, insertChatUpload, deleteChatUpload,
-  fetchChatScores, fetchChatContent,
+  fetchChatScores, fetchChatContent, fetchChatNotes,
 } from '../chat';
 
 const card = { background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginBottom: 16 };
@@ -100,6 +100,161 @@ function ScoreTable({ scores, showStaff }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ─── 대화 캘린더 ───
+// 메모 유형별 색: 제안(초록) 질문(파랑) 요청(보라) 보고(회색) 미흡(빨강) 기타(노랑)
+const KIND_COLOR = { '제안': C.ok, '질문': C.ac, '요청': C.pur, '보고': C.txd, '미흡': C.no, '기타': C.yel };
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const diffDays = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+
+function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
+  const [notes, setNotes] = useState([]);
+  const [selStaff, setSelStaff] = useState('all');           // 관리자용 직원 필터
+  const [ym, setYm] = useState(todayStr().slice(0, 7));       // 'YYYY-MM'
+  const [selDay, setSelDay] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const list = await fetchChatNotes(isAdmin ? null : ownerId, daysAgo(120));
+      setNotes(list);
+    })();
+  }, [isAdmin, ownerId]);
+
+  // 관리자 필터 적용
+  const visNotes = notes.filter(n => selStaff === 'all' || n.owner_id === selStaff);
+  const visUploads = (uploads || []).filter(u => (selStaff === 'all' || u.owner_id === selStaff));
+
+  // ── 브랜드별 마지막 대화일 → 무응답 경고 계산 ──
+  const lastTalk = {}; // key: owner||client → { date, staffName, client }
+  for (const u of visUploads) {
+    const k = u.owner_id + '||' + u.client_name;
+    if (!lastTalk[k] || u.last_date > lastTalk[k].date)
+      lastTalk[k] = { date: u.last_date, staffName: u.uploader_name, client: u.client_name };
+  }
+  for (const n of visNotes) {
+    if (n.kind === '미흡' && /대화.{0,4}없/.test(n.note || '')) continue;
+    const k = n.owner_id + '||' + n.client_name;
+    if (!lastTalk[k] || n.date > lastTalk[k].date)
+      lastTalk[k] = { date: n.date, staffName: n.staff_name, client: n.client_name };
+  }
+  const today = todayStr();
+  const warnings = Object.values(lastTalk)
+    .map(v => ({ ...v, days: diffDays(v.date, today), due: addDays(v.date, 30) }))
+    .filter(v => v.days >= 14)
+    .sort((a, b) => b.days - a.days);
+
+  // ── 달력 그리드 ──
+  const [Y, M] = ym.split('-').map(Number);
+  const firstDow = new Date(Y, M - 1, 1).getDay();
+  const daysInMonth = new Date(Y, M, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${ym}-${String(d).padStart(2, '0')}`);
+
+  const notesByDay = {};
+  for (const n of visNotes) (notesByDay[n.date] = notesByDay[n.date] || []).push(n);
+  // 경고를 마감일 캘린더 칸에도 표시
+  for (const w of warnings) {
+    const cellDate = w.due >= today ? w.due : today;
+    if (cellDate.slice(0, 7) === ym)
+      (notesByDay[cellDate] = notesByDay[cellDate] || []).push({
+        id: 'warn-' + w.client + w.staffName, kind: '경고', client_name: w.client, staff_name: w.staffName,
+        note: `꼭 대화 필요 (${w.days}일째 대화 없음)`, date: cellDate,
+      });
+  }
+
+  const moveMonth = (d) => {
+    const nd = new Date(Y, M - 1 + d, 1);
+    setYm(`${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}`);
+    setSelDay(null);
+  };
+
+  const chipColor = (n) => n.kind === '경고' ? C.no : (KIND_COLOR[n.kind] || C.yel);
+  const chipLabel = (n) => (isAdmin && selStaff === 'all' ? `[${n.staff_name}] ` : '') + `${n.client_name}: ${n.note}`;
+
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>📅 대화 캘린더</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {isAdmin && (
+            <select value={selStaff} onChange={e => setSelStaff(e.target.value)}
+              style={{ background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, color: C.tx, fontSize: 12, padding: '5px 8px' }}>
+              <option value="all">전체 직원</option>
+              {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          )}
+          <button style={btnGhost} onClick={() => moveMonth(-1)}>◀</button>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>{Y}년 {M}월</span>
+          <button style={btnGhost} onClick={() => moveMonth(1)}>▶</button>
+        </div>
+      </div>
+
+      {/* 요일 헤더 + 날짜 칸 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
+        {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
+          <div key={d} style={{ textAlign: 'center', fontSize: 11, color: i === 0 ? C.no : i === 6 ? C.ac : C.txd, padding: '4px 0', fontWeight: 600 }}>{d}</div>
+        ))}
+        {cells.map((date, i) => (
+          <div key={i} onClick={() => date && setSelDay(selDay === date ? null : date)}
+            style={{
+              minHeight: 64, background: date ? (date === today ? C.ac + '14' : C.sf2) : 'transparent',
+              border: `1px solid ${date === selDay ? C.ac : C.bd}`, borderRadius: 6, padding: 4,
+              cursor: date ? 'pointer' : 'default', overflow: 'hidden',
+            }}>
+            {date && <>
+              <div style={{ fontSize: 10, color: date === today ? C.ac : C.txm, fontWeight: date === today ? 800 : 400 }}>{Number(date.slice(8))}</div>
+              {(notesByDay[date] || []).slice(0, 3).map(n => (
+                <div key={n.id} style={{
+                  fontSize: 9.5, color: chipColor(n), background: chipColor(n) + '18',
+                  borderRadius: 3, padding: '1px 3px', marginTop: 2,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>{n.kind === '경고' ? '🔴 ' : ''}{chipLabel(n)}</div>
+              ))}
+              {(notesByDay[date] || []).length > 3 && <div style={{ fontSize: 9, color: C.txm, marginTop: 1 }}>+{notesByDay[date].length - 3}건 더</div>}
+            </>}
+          </div>
+        ))}
+      </div>
+
+      {/* 선택한 날짜 상세 */}
+      {selDay && (
+        <div style={{ marginTop: 10, background: C.sf2, borderRadius: 8, padding: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.ac, marginBottom: 6 }}>{selDay}</div>
+          {(notesByDay[selDay] || []).length === 0 && <div style={{ fontSize: 12, color: C.txm }}>이 날짜에는 기록이 없습니다.</div>}
+          {(notesByDay[selDay] || []).map(n => (
+            <div key={n.id} style={{ fontSize: 12.5, marginBottom: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
+              <span style={{ color: chipColor(n), fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>[{n.kind}]</span>
+              <span style={{ color: C.tx }}>{(isAdmin ? `(${n.staff_name}) ` : '') + n.client_name} — {n.note}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 무응답 브랜드 경고 목록 */}
+      {warnings.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.no, marginBottom: 6 }}>⚠️ 대화가 끊긴 브랜드</div>
+          {warnings.map(w => (
+            <div key={w.client + w.staffName} style={{
+              fontSize: 12.5, padding: '6px 10px', marginBottom: 4, borderRadius: 6,
+              background: (w.days >= 30 ? C.no : C.warn) + '14',
+              borderLeft: `3px solid ${w.days >= 30 ? C.no : C.warn}`, color: C.tx,
+            }}>
+              <b>{w.client}</b>{isAdmin ? ` (${w.staffName})` : ''} — {w.due >= today
+                ? `${Number(w.due.slice(5, 7))}월 ${Number(w.due.slice(8))}일까지 꼭 대화 필요 (${w.days}일째 대화 없음)`
+                : `즉시 대화 필요 (${w.days}일째 대화 없음)`}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 10.5, color: C.txm, marginTop: 8 }}>
+        ※ 메모는 대화 분석이 완료될 때 자동으로 채워집니다. 14일 이상 대화가 없으면 주의, 30일 이상이면 경고로 표시됩니다.
+      </div>
     </div>
   );
 }
@@ -210,6 +365,9 @@ function StaffView({ currentUser }) {
         )}
       </div>
 
+      {/* 내 대화 캘린더 */}
+      <CalendarSection isAdmin={false} ownerId={currentUser.id} uploads={uploads} />
+
       {/* 내 업로드 이력 */}
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>내 업로드 이력</div>
@@ -306,6 +464,9 @@ function AdminView() {
           </tbody>
         </table>
       </div>
+
+      {/* 대화 캘린더 (전 직원) */}
+      <CalendarSection isAdmin={true} ownerId={null} uploads={uploads} staff={staff} />
 
       {/* 분석 결과 */}
       <div style={card}>
