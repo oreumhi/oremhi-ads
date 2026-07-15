@@ -178,3 +178,29 @@ export async function setReviewStoreOwner(store, ownerId, brand) {
   await sb.from('review_checks').update({ owner_id: ownerId || null, brand: brand || store }).eq('store', store);
   return true;
 }
+
+// ─── 후기 별칭 (스토어명/상품명 대시보드에서 수정 → 기억) ───
+export async function fetchReviewAliases() {
+  if (!sb) return { products: {}, stores: {} };
+  const [pa, sa] = await Promise.all([
+    sb.from('review_product_alias').select('url,display_name'),
+    sb.from('review_store_alias').select('store,display_name'),
+  ]);
+  const products = {}; (pa.data || []).forEach(r => { if (r.display_name) products[r.url] = r.display_name; });
+  const stores = {}; (sa.data || []).forEach(r => { if (r.display_name) stores[r.store] = r.display_name; });
+  return { products, stores };
+}
+
+export async function setProductAlias(url, name) {
+  if (!sb || !url) return false;
+  const { error } = await sb.from('review_product_alias').upsert(
+    { url, display_name: name || null, updated_at: new Date().toISOString() }, { onConflict: 'url' });
+  return !error;
+}
+
+export async function setStoreAlias(store, name) {
+  if (!sb || !store) return false;
+  const { error } = await sb.from('review_store_alias').upsert(
+    { store, display_name: name || null, updated_at: new Date().toISOString() }, { onConflict: 'store' });
+  return !error;
+}
