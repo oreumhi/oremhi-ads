@@ -12,6 +12,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { C } from '../config';
 import { fetchUsers, createUser, deleteUser } from '../store';
 import { hashPin } from '../utils';
+import StaffTrend from '../components/StaffTrend';
 import {
   parseKakaoExport, guessClientName,
   fetchChatUploads, findPrevUpload, insertChatUpload, deleteChatUpload,
@@ -578,6 +579,9 @@ function AdminView({ currentUser }) {
           </tbody>
         </table>
       </div>
+
+      {/* 직원별 대화 품질 추세 (심화) */}
+      <StaffTrend scores={scores} staff={staff} />
 
       {/* 대화 캘린더 (전 직원) */}
       <CalendarSection isAdmin={true} ownerId={null} uploads={uploads} staff={staff} />
