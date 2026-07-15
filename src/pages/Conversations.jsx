@@ -38,29 +38,115 @@ const daysAgo = (n) => {
 // 점수 색상
 const scoreColor = (s) => (s >= 70 ? C.ok : s >= 45 ? C.warn : C.no);
 
-// ─── 점수 상세 (펼침) ───
+// ─── 채점 기준 (6개 항목, 통화 적극성 최고 배점) ───
+const CRITERIA = [
+  ['통화 적극성', 'score_call', 25, '우리가 먼저 전화/통화를 시도했는가 (통화 후 단톡방에 내용 정리 필수). 가장 높이 평가하는 항목입니다.'],
+  ['진단력', 'score_diagnosis', 20, '수치에 판단·원인을 붙이는가 ("저조합니다, 원인은 ~")'],
+  ['제안력', 'score_proposal', 20, '구체적 조치를 제안하는가 ("~를 이렇게 수정해보겠습니다")'],
+  ['질문·대화유도', 'score_question', 20, '승인·의견을 묻는 질문으로 끝내는가 ("~해도 될까요?")'],
+  ['광고주 반응', 'score_response', 10, '광고주가 실질적으로 답하는가 (형식적 "감사합니다" 제외)'],
+  ['선제성', 'score_proactive', 5, '광고주가 묻기 전에 먼저 움직이는가'],
+];
+
+// 신입 교육용 표준 문장
+const STANDARD_LINES = [
+  ['📞 통화 (가장 높은 평가)', '오늘 광고주님과 통화했습니다. [통화 내용] 로아스 하락 원인과 개선 방향을 논의했고, ○○를 진행하기로 했습니다. — 통화 후에는 반드시 이렇게 단톡방에 내용을 정리해 올리세요.', '#1a7a3c'],
+  ['성과 좋음', '어제 로아스 651%입니다. EV5 키워드 반응이 좋았던 덕분입니다. 이 키워드군 예산을 조금 늘려볼까요?', '#2c5f8a'],
+  ['성과 나쁨', '어제 로아스 143%로 저조합니다. 원인을 보니 ○○ 키워드 클릭만 늘고 전환이 없었습니다. 해당 키워드 입찰을 낮춰보겠습니다. 진행해도 될까요?', '#c0392b'],
+  ['점검 후 보고', '점검 결과 ○○가 문제였습니다. ○○로 수정했고, 효과는 ○일 뒤 다시 보고드리겠습니다.', '#b8860b'],
+];
+
+// 막대 하나
+function Bar({ label, value, max, desc, showDesc }) {
+  const has = value !== null && value !== undefined;
+  const pct = has ? Math.round((value / max) * 100) : 0;
+  const col = !has ? C.txm : pct >= 70 ? C.ok : pct >= 45 ? C.warn : C.no;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+        <span style={{ fontSize: 12.5, color: C.tx, fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 12, color: col, fontWeight: 700 }}>{has ? value : '-'}<span style={{ color: C.txm, fontWeight: 400 }}>/{max}</span></span>
+      </div>
+      <div style={{ background: C.sf3, borderRadius: 5, height: 8, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: col, borderRadius: 5, transition: 'width .3s' }} />
+      </div>
+      {showDesc && <div style={{ fontSize: 11, color: C.txm, marginTop: 3, lineHeight: 1.5 }}>{desc}</div>}
+    </div>
+  );
+}
+
+// ─── 점수 상세 (간소 / 상세 토글) ───
 function ScoreDetail({ s }) {
-  const items = [
-    ['진단력', s.score_diagnosis, 25],
-    ['제안력', s.score_proposal, 25],
-    ['질문·대화유도', s.score_question, 25],
-    ['광고주 반응', s.score_response, 15],
-    ['선제성', s.score_proactive, 10],
-  ];
+  const [detail, setDetail] = React.useState(false);
+  const callNote = (s.score_call === null || s.score_call === undefined)
+    ? '이 기간에 통화 기록이 없습니다. 광고주와 통화하면 통화 내용을 단톡방에 정리해 올려주세요 — 가장 높이 평가됩니다.'
+    : null;
+
   return (
     <div style={{ background: C.sf2, borderRadius: 10, padding: 14, margin: '4px 0 10px' }}>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
-        {items.map(([label, v, max]) => (
-          <div key={label} style={{ minWidth: 90 }}>
-            <div style={{ fontSize: 11, color: C.txd }}>{label}</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>{v ?? '-'}<span style={{ fontSize: 11, color: C.txm }}>/{max}</span></div>
-          </div>
-        ))}
+      {/* 토글 */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'inline-flex', background: C.sf3, borderRadius: 7, padding: 2 }}>
+          {[['간소', false], ['상세', true]].map(([lb, v]) => (
+            <button key={lb} onClick={() => setDetail(v)} style={{
+              padding: '4px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
+              fontWeight: detail === v ? 700 : 400,
+              background: detail === v ? C.ac : 'transparent',
+              color: detail === v ? '#fff' : C.txd,
+            }}>{lb}</button>
+          ))}
+        </div>
       </div>
+
+      {/* 상세: 채점 기준 설명 */}
+      {detail && (
+        <div style={{ background: C.sf3, borderRadius: 8, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ac, marginBottom: 6 }}>채점 기준</div>
+          <div style={{ fontSize: 12, color: C.txd, lineHeight: 1.7 }}>
+            "대화다운 대화"는 <b style={{ color: C.tx }}>통화 → 수치 → 판단 → 원인 진단 → 조치 제안 → 질문(승인 요청)</b> 구조입니다.
+            특히 <b style={{ color: C.ok }}>우리가 먼저 전화한 경우</b>를 가장 높이 평가합니다.
+          </div>
+        </div>
+      )}
+
+      {/* 항목별 막대 (상세는 설명 포함) */}
+      <div style={{ marginBottom: 10 }}>
+        {CRITERIA.map(([label, key, max, desc]) => (
+          <Bar key={key} label={label} value={s[key]} max={max} desc={desc} showDesc={detail} />
+        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, paddingTop: 6, borderTop: `1px solid ${C.bd}` }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: C.tx }}>총점</span>
+          <span style={{ fontSize: 16, fontWeight: 800, color: scoreColor(s.score_total) }}>{s.score_total}<span style={{ fontSize: 11, color: C.txm, fontWeight: 400 }}>/100</span></span>
+        </div>
+      </div>
+
+      {callNote && (
+        <div style={{ fontSize: 11.5, color: C.warn, background: C.warn + '14', border: `1px solid ${C.warn}33`, borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+          📞 {callNote}
+        </div>
+      )}
+
+      {/* 총평·인용 */}
       {s.comment && <Block label="총평" text={s.comment} color={C.ac} />}
       {s.good_example && <Block label="잘한 대화" text={s.good_example} color={C.ok} />}
       {s.bad_example && <Block label="아쉬운 대화" text={s.bad_example} color={C.no} />}
       {s.advice && <Block label="다음 주 개선 포인트" text={s.advice} color={C.warn} />}
+
+      {/* 상세: 신입 교육용 표준 문장 */}
+      {detail && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.pur, marginBottom: 6 }}>📘 이렇게 대화하세요 (신입 교육용 표준 문장)</div>
+          {STANDARD_LINES.map(([label, text, color]) => (
+            <div key={label} style={{ borderLeft: `3px solid ${color}`, padding: '6px 10px', marginBottom: 6, background: C.sf3, borderRadius: 6 }}>
+              <div style={{ fontSize: 11, color, fontWeight: 700, marginBottom: 2 }}>{label}</div>
+              <div style={{ fontSize: 12.5, color: C.tx, lineHeight: 1.6 }}>{text}</div>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: C.txm, marginTop: 6 }}>
+            ※ 매주 광고주 의견을 묻는 질문을 1개 이상 포함하세요. 숫자만 던지는 보고는 대화가 아닙니다.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -214,7 +300,7 @@ function UploadSection({ currentUser, isAdmin, staff, onDone }) {
 
 // ─── 대화 캘린더 ───
 // 메모 유형별 색: 제안(초록) 질문(파랑) 요청(보라) 보고(회색) 미흡(빨강) 기타(노랑)
-const KIND_COLOR = { '제안': C.ok, '질문': C.ac, '요청': C.pur, '보고': C.txd, '미흡': C.no, '기타': C.yel };
+const KIND_COLOR = { '통화': C.ok, '제안': C.cyan, '질문': C.ac, '요청': C.pur, '보고': C.txd, '미흡': C.no, '기타': C.yel };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const diffDays = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
