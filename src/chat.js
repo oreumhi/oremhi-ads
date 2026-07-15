@@ -139,3 +139,42 @@ export async function fetchChatContent(uploadId) {
   if (error || !data) return '';
   return data.content || '';
 }
+
+// ═══════════════════════════════════════════
+// 후기 체크 (review_checks)
+// ═══════════════════════════════════════════
+
+export async function fetchReviewChecks(date, ownerId) {
+  if (!sb) return [];
+  let q = sb.from('review_checks').select('*').eq('date', date).order('store', { ascending: true }).limit(2000);
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
+  if (error) { console.error('[review_checks] 조회:', error.message); return []; }
+  return data || [];
+}
+
+export async function fetchReviewDates(ownerId) {
+  if (!sb) return [];
+  let q = sb.from('review_checks').select('date').order('date', { ascending: false }).limit(2000);
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
+  if (error) return [];
+  return [...new Set((data || []).map(r => r.date))];
+}
+
+export async function fetchReviewStoreMap() {
+  if (!sb) return [];
+  const { data, error } = await sb.from('review_store_map').select('*');
+  if (error) { console.error('[review_store_map] 조회:', error.message); return []; }
+  return data || [];
+}
+
+export async function setReviewStoreOwner(store, ownerId, brand) {
+  if (!sb) return false;
+  const up = await sb.from('review_store_map').upsert(
+    { store, owner_id: ownerId || null, brand: brand || store, updated_at: new Date().toISOString() },
+    { onConflict: 'store' });
+  if (up.error) { console.error('[review_store_map] 저장:', up.error.message); return false; }
+  await sb.from('review_checks').update({ owner_id: ownerId || null, brand: brand || store }).eq('store', store);
+  return true;
+}
