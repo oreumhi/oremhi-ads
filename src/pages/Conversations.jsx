@@ -10,7 +10,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { C } from '../config';
-import { fetchUsers } from '../store';
+import { fetchUsers, createUser, deleteUser } from '../store';
+import { hashPin } from '../utils';
 import {
   parseKakaoExport, guessClientName,
   fetchChatUploads, findPrevUpload, insertChatUpload, deleteChatUpload,
@@ -633,11 +634,42 @@ function AdminView({ currentUser }) {
 function RoomOwnerSection({ staff, onChanged }) {
   const [rooms, setRooms] = useState([]);
   const [busy, setBusy] = useState('');
+  const [ns, setNs] = useState({ name: '', username: '', password: '' });
+  const [smsg, setSmsg] = useState('');
 
   const load = useCallback(async () => {
     setRooms(await fetchChatRoomOwners());
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // ─── 담당 직원 추가 ───
+  const addStaff = async () => {
+    if (!ns.name.trim()) return setSmsg('❌ 직원 이름을 입력해주세요');
+    if (!ns.username.trim()) return setSmsg('❌ 로그인 아이디를 입력해주세요');
+    if (ns.password.length < 4) return setSmsg('❌ 비밀번호는 4자리 이상이어야 합니다');
+    if ((staff || []).find(u => u.username === ns.username.trim())) return setSmsg('❌ 이미 사용중인 아이디입니다');
+    setSmsg('추가 중...');
+    const hash = await hashPin(ns.password);
+    const user = await createUser({
+      name: ns.name.trim(), username: ns.username.trim(),
+      password_hash: hash, role: 'staff', assigned_brands: '[]',
+    });
+    if (user) {
+      setNs({ name: '', username: '', password: '' });
+      setSmsg('✅ 직원이 추가되었습니다');
+      onChanged && onChanged();
+    } else setSmsg('❌ 추가 실패');
+  };
+
+  // ─── 담당 직원 삭제 ───
+  const delStaff = async (u) => {
+    if (!window.confirm(`"${u.name}" 직원 계정을 삭제할까요?\n(이 직원에게 지정된 방은 담당자 미지정으로 바뀝니다)`)) return;
+    setSmsg('삭제 중...');
+    if (await deleteUser(u.id)) {
+      setSmsg('✅ 직원이 삭제되었습니다');
+      onChanged && onChanged();
+    } else setSmsg('❌ 삭제 실패');
+  };
 
   const assign = async (room, ownerId) => {
     setBusy(room.room_name);
@@ -660,6 +692,32 @@ function RoomOwnerSection({ staff, onChanged }) {
         매일 아침 카톡 "대화 분석" 폴더의 방들이 자동으로 올라옵니다. 방마다 담당 직원을 한 번 지정하면 다음부터 자동 적용됩니다.
         {unassigned > 0 && <span style={{ color: C.warn, fontWeight: 700 }}> · 담당자 미지정 {unassigned}개</span>}
       </div>
+
+      {/* 담당 직원 추가·삭제 */}
+      <div style={{ background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 8, padding: 12, marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>담당 직원 관리</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {(staff || []).map(u => (
+            <span key={u.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 16, padding: '4px 6px 4px 12px', fontSize: 12 }}>
+              {u.name}
+              <button title="삭제" onClick={() => delStaff(u)}
+                style={{ background: C.no + '22', color: C.no, border: 'none', borderRadius: '50%', width: 18, height: 18, cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>×</button>
+            </span>
+          ))}
+          {(staff || []).length === 0 && <span style={{ fontSize: 12, color: C.txm }}>등록된 직원이 없습니다</span>}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <input placeholder="이름" value={ns.name} onChange={e => setNs({ ...ns, name: e.target.value })}
+            style={{ ...selStyle, width: 90 }} />
+          <input placeholder="로그인 아이디" value={ns.username} onChange={e => setNs({ ...ns, username: e.target.value })}
+            style={{ ...selStyle, width: 120 }} />
+          <input placeholder="비밀번호(4자리+)" type="password" value={ns.password} onChange={e => setNs({ ...ns, password: e.target.value })}
+            style={{ ...selStyle, width: 120 }} />
+          <button style={btn} onClick={addStaff}>직원 추가</button>
+          {smsg && <span style={{ fontSize: 12, color: smsg.startsWith('✅') ? C.ok : smsg.startsWith('❌') ? C.no : C.txd }}>{smsg}</span>}
+        </div>
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><th style={th}>카톡방</th><th style={th}>광고주</th><th style={th}>담당 직원</th><th style={th}>수집</th></tr></thead>
