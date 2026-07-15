@@ -1,10 +1,10 @@
 // ============================================
 // 후기 체크 페이지
 //
-// 후기체크 프로그램이 자동 전송한 결과를 날짜별로 확인.
-// 형태: 카톡으로 보내던 것과 동일 (매장별, 상품별 저평점 위치)
-// 권한: 대표(admin) 전체 + 매장 담당 지정 / 직원은 담당 매장만
-// 이름: 스토어명·상품명을 대시보드에서 직접 수정 → URL/매장명 기준으로 기억
+// - 매장/상품 목록(review_products)을 기준으로 표시. 대표+직원 모두 매장·상품 추가/삭제 가능.
+// - 목록 변경은 DB에 저장 → 다음날 자동실행이 그 목록을 읽어 점검(기억됨).
+// - 날짜를 선택하면 그날 점검 결과(review_checks)를 각 상품에 표시.
+// - 스토어명/상품명 인라인 수정(별칭), 매장별 카톡 복사, 매장 담당 지정(대표).
 // ============================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -13,20 +13,19 @@ import { fetchUsers } from '../store';
 import {
   fetchReviewChecks, fetchReviewDates, fetchReviewStoreMap, setReviewStoreOwner,
   fetchReviewAliases, setProductAlias, setStoreAlias,
+  fetchReviewProducts, addReviewProduct, deleteReviewProduct, deleteReviewStore,
 } from '../chat';
 
 const card = { background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginBottom: 16 };
 const selStyle = { background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, color: C.tx, fontSize: 12, padding: '5px 8px' };
-const inpStyle = { background: C.sf3, border: `1px solid ${C.ac}`, borderRadius: 6, color: C.tx, fontSize: 13, padding: '3px 8px' };
+const inpStyle = { background: C.sf3, border: `1px solid ${C.ac}`, borderRadius: 6, color: C.tx, fontSize: 13, padding: '5px 8px' };
 const penBtn = { background: 'none', border: 'none', color: C.txm, cursor: 'pointer', fontSize: 12, padding: '0 4px' };
+const smallBtn = { background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '4px 10px', color: C.txd, cursor: 'pointer', fontSize: 11 };
 
 const openUrl = (u) => { try { window.open(u, '_blank', 'noopener'); } catch { /* ignore */ } };
 
-// 클립보드 복사 (실패 시 임시 textarea 폴백)
 async function copyText(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
-  } catch { /* fall through */ }
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch { /* fall through */ }
   try {
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
@@ -35,23 +34,21 @@ async function copyText(text) {
   } catch { return false; }
 }
 
-// 매장 1개를 카톡용 텍스트로 (지금 화면 그대로, 전체 상품)
-function buildStoreText(storeName, items, dateStr, at, productName) {
+function buildStoreText(storeName, items, dateStr, at, nameOf, resultOf) {
   const lines = [];
-  const lowTotal = items.reduce((s, p) => s + (p.low_count || 0), 0);
+  let lowTotal = 0;
+  items.forEach(p => { const r = resultOf(p); if (r) lowTotal += (r.low_count || 0); });
   lines.push(`[후기체크·${storeName}] ${dateStr}${at ? ' ' + at : ''}`);
   lines.push(lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음');
   for (const p of items) {
-    const nm = productName(p);
-    if (!p.ok) { lines.push(`· ${nm} ❓ ${p.note || '확인 필요'}`); continue; }
-    const lows = p.lows || [];
+    const nm = nameOf(p); const r = resultOf(p);
+    if (!r) { lines.push(`· ${nm} (점검 전)`); continue; }
+    if (!r.ok) { lines.push(`· ${nm} ❓ ${r.note || '확인 필요'}`); continue; }
+    const lows = r.lows || [];
     if (lows.length > 0) {
-      const detail = lows.map(([pos, rat]) => `${pos}번째 ★${rat}`).join(', ');
-      lines.push(`· ${nm} ⚠️ ${detail}`);
+      lines.push(`· ${nm} ⚠️ ${lows.map(([pos, rat]) => `${pos}번째 ★${rat}`).join(', ')}`);
       if (p.url) lines.push(`  ${p.url}`);
-    } else {
-      lines.push(`· ${nm} ✅`);
-    }
+    } else { lines.push(`· ${nm} ✅`); }
   }
   return lines.join('\n');
 }
@@ -61,7 +58,6 @@ function Star({ n }) {
   return <span style={{ color: col, fontWeight: 700 }}>★{n}</span>;
 }
 
-// 인라인 편집 가능한 이름
 function EditableName({ value, canEdit, onSave, style }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(value);
@@ -85,32 +81,33 @@ function EditableName({ value, canEdit, onSave, style }) {
   );
 }
 
-// 상품 한 줄 (카톡 형태 그대로 + 상품명 수정)
-function ProductRow({ p, name, canEdit, onRename }) {
-  const lows = p.lows || [];
-  const bad = !p.ok;
-  const hasLow = lows.length > 0;
+function ProductRow({ p, name, result, canEdit, onRename, onDelete }) {
+  const r = result;
+  const lows = (r && r.lows) || [];
   return (
-    <div style={{ padding: '7px 0', borderBottom: `1px solid ${C.bd}22` }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13 }}>· </span>
-        <EditableName value={name} canEdit={canEdit} onSave={onRename} style={{ fontSize: 13, fontWeight: 600, color: C.tx }} />
-        {bad ? (
-          <span style={{ fontSize: 12, color: C.txm }}>❓ {p.note || '확인 필요'}</span>
-        ) : hasLow ? (
-          <span style={{ fontSize: 12.5, color: C.no }}>
-            ⚠️ {lows.map(([pos, rat], i) => (
-              <span key={i}>{i > 0 ? ', ' : ''}{pos}번째 <Star n={rat} /></span>
-            ))}
-          </span>
-        ) : (
-          <span style={{ fontSize: 12.5, color: C.ok }}>✅</span>
+    <div style={{ padding: '7px 0', borderBottom: `1px solid ${C.bd}22`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13 }}>· </span>
+          <EditableName value={name} canEdit={canEdit} onSave={onRename} style={{ fontSize: 13, fontWeight: 600, color: C.tx }} />
+          {!r ? (
+            <span style={{ fontSize: 12, color: C.txm }}>· 점검 전 (내일부터 점검)</span>
+          ) : !r.ok ? (
+            <span style={{ fontSize: 12, color: C.txm }}>❓ {r.note || '확인 필요'}</span>
+          ) : lows.length > 0 ? (
+            <span style={{ fontSize: 12.5, color: C.no }}>
+              ⚠️ {lows.map(([pos, rat], i) => <span key={i}>{i > 0 ? ', ' : ''}{pos}번째 <Star n={rat} /></span>)}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12.5, color: C.ok }}>✅</span>
+          )}
+        </div>
+        {lows.length > 0 && p.url && (
+          <div onClick={() => openUrl(p.url)} style={{ fontSize: 11, color: C.ac, cursor: 'pointer', marginTop: 2, wordBreak: 'break-all' }}>{p.url}</div>
         )}
       </div>
-      {hasLow && p.url && (
-        <div onClick={() => openUrl(p.url)} style={{ fontSize: 11, color: C.ac, cursor: 'pointer', marginTop: 2, wordBreak: 'break-all' }}>
-          {p.url}
-        </div>
+      {canEdit && (
+        <button style={{ ...penBtn, color: C.no, flexShrink: 0 }} title="상품 삭제" onClick={onDelete}>✕</button>
       )}
     </div>
   );
@@ -119,49 +116,55 @@ function ProductRow({ p, name, canEdit, onRename }) {
 export default function Reviews({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
   const ownerId = currentUser?.id;
-  const canEdit = !!currentUser; // 대표+직원 모두 이름 수정 가능
+  const canEdit = !!currentUser;
 
   const [dates, setDates] = useState([]);
   const [date, setDate] = useState('');
-  const [rows, setRows] = useState([]);
+  const [results, setResults] = useState({});
+  const [products, setProducts] = useState([]);
   const [staff, setStaff] = useState([]);
-  const [storeMap, setStoreMap] = useState({}); // store -> owner_id
+  const [storeMap, setStoreMap] = useState({});
   const [alias, setAlias] = useState({ products: {}, stores: {} });
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(null); // 복사된 매장명
+  const [copied, setCopied] = useState(null);
+  const [adding, setAdding] = useState(null);
+  const [newProd, setNewProd] = useState({ name: '', url: '' });
+  const [newStore, setNewStore] = useState('');
 
-  // 날짜 목록 + 별칭 로드
+  const loadBase = useCallback(async () => {
+    const [ds, al, prods] = await Promise.all([fetchReviewDates(null), fetchReviewAliases(), fetchReviewProducts()]);
+    setDates(ds); setDate(prev => prev || ds[0] || ''); setAlias(al); setProducts(prods);
+    if (isAdmin) {
+      const [users, sm] = await Promise.all([fetchUsers(), fetchReviewStoreMap()]);
+      setStaff(users.filter(u => u.role === 'staff'));
+      setStoreMap(Object.fromEntries(sm.map(m => [m.store, m.owner_id])));
+    }
+    setLoading(false);
+  }, [isAdmin]);
+  useEffect(() => { loadBase(); }, [loadBase]);
+
   useEffect(() => {
     (async () => {
-      const [ds, al] = await Promise.all([fetchReviewDates(isAdmin ? null : ownerId), fetchReviewAliases()]);
-      setDates(ds); setDate(ds[0] || ''); setAlias(al);
-      if (isAdmin) {
-        const [users, sm] = await Promise.all([fetchUsers(), fetchReviewStoreMap()]);
-        setStaff(users.filter(u => u.role === 'staff'));
-        setStoreMap(Object.fromEntries(sm.map(m => [m.store, m.owner_id])));
-      }
-      setLoading(false);
+      if (!date) { setResults({}); return; }
+      const rows = await fetchReviewChecks(date, isAdmin ? null : ownerId);
+      setResults(Object.fromEntries(rows.map(r => [r.url, r])));
     })();
-  }, [isAdmin, ownerId]);
-
-  const load = useCallback(async () => {
-    if (!date) { setRows([]); return; }
-    const r = await fetchReviewChecks(date, isAdmin ? null : ownerId);
-    setRows(r);
   }, [date, isAdmin, ownerId]);
-  useEffect(() => { load(); }, [load]);
+
+  const storeLabel = (s) => alias.stores[s] || s;
+  const productLabel = (p) => alias.products[p.url] || p.name || '(이름없음)';
+  const resultOf = (p) => results[p.url];
 
   const byStore = {};
-  rows.forEach(r => { (byStore[r.store] = byStore[r.store] || []).push(r); });
-  const stores = Object.keys(byStore).sort();
+  products.forEach(p => { (byStore[p.store] = byStore[p.store] || []).push(p); });
+  let stores = Object.keys(byStore);
+  if (!isAdmin) stores = stores.filter(s => storeMap[s] === ownerId);
+  stores = stores.sort();
 
   const assignOwner = async (store, oid) => {
     setStoreMap(prev => ({ ...prev, [store]: oid }));
-    await setReviewStoreOwner(store, oid, alias.stores[store] || store);
-    load();
+    await setReviewStoreOwner(store, oid, storeLabel(store));
   };
-
-  // 이름 수정 (즉시 화면 반영 + DB 저장 → 앞으로도 기억)
   const renameStore = async (store, name) => {
     setAlias(prev => ({ ...prev, stores: { ...prev.stores, [store]: name } }));
     await setStoreAlias(store, name);
@@ -170,90 +173,122 @@ export default function Reviews({ currentUser }) {
     setAlias(prev => ({ ...prev, products: { ...prev.products, [url]: name } }));
     await setProductAlias(url, name);
   };
-
-  // 복사하기: 매장 전체를 카톡용 텍스트로 복사
   const handleCopy = async (store, items, at) => {
-    const text = buildStoreText(storeLabel(store), items, date, at, productLabel);
+    const text = buildStoreText(storeLabel(store), items, date, at, productLabel, resultOf);
     const ok = await copyText(text);
     if (ok) { setCopied(store); setTimeout(() => setCopied(null), 2000); }
-    else { alert('복사에 실패했습니다. 브라우저 권한을 확인해주세요.'); }
+    else alert('복사에 실패했습니다.');
   };
 
-  const storeLabel = (s) => alias.stores[s] || s;
-  const productLabel = (p) => alias.products[p.url] || p.product_name;
+  const submitAddProduct = async (store) => {
+    if (!newProd.url.trim()) return alert('상품 URL을 입력해주세요');
+    const r = await addReviewProduct({ store, name: newProd.name.trim() || '새 상품', url: newProd.url.trim() });
+    if (!r.ok) return alert('추가 실패: ' + r.msg);
+    setAdding(null); setNewProd({ name: '', url: '' });
+    await loadBase();
+  };
+  const removeProduct = async (p) => {
+    if (!confirm(`"${productLabel(p)}" 상품을 목록에서 삭제할까요?\n다음 실행부터 점검하지 않습니다.`)) return;
+    await deleteReviewProduct(p.url); await loadBase();
+  };
+  const removeStore = async (store) => {
+    const cnt = (byStore[store] || []).filter(p => !p._placeholder).length;
+    if (!confirm(`"${storeLabel(store)}" 매장의 상품 ${cnt}개를 전부 삭제할까요?\n다음 실행부터 이 매장은 점검하지 않습니다.`)) return;
+    await deleteReviewStore(store); await loadBase();
+  };
+  const submitAddStore = () => {
+    const s = newStore.trim();
+    if (!s) return;
+    setNewStore(''); setAdding(s); setNewProd({ name: '상품1', url: '' });
+    setProducts(prev => prev.some(p => p.store === s) ? prev : [...prev, { id: '_new_' + s, store: s, name: '', url: '', _placeholder: true }]);
+  };
 
   if (loading) return <div style={{ color: C.txd, fontSize: 13, padding: 20 }}>불러오는 중...</div>;
 
   return (
     <div>
       <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>후기 체크</div>
-      <div style={{ fontSize: 12, color: C.txd, marginBottom: 16 }}>
+      <div style={{ fontSize: 12, color: C.txd, marginBottom: 16, lineHeight: 1.6 }}>
         매장·상품별 상위 후기 중 저평점(별점 3 이하)이 상단에 있는지 매일 자동 점검합니다.
-        {' 매장명·상품명 옆 ✏️로 이름을 바꾸면 앞으로도 그 이름으로 표시됩니다.'}
+        매장·상품 추가/삭제, 이름 수정은 모두 저장되어 <b style={{ color: C.tx }}>다음날 자동 점검부터 반영</b>됩니다.
+        {isAdmin && ' (직원 계정 추가/삭제는 설정 메뉴에서)'}
       </div>
 
-      {dates.length === 0 ? (
+      <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: C.txd }}>📅 날짜</span>
+        <select value={date} onChange={e => setDate(e.target.value)} style={{ ...selStyle, fontSize: 13, padding: '7px 10px' }}>
+          {dates.length === 0 && <option value="">데이터 없음</option>}
+          {dates.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <span style={{ fontSize: 12, color: C.txm }}>매장 {stores.length}개 · 상품 {products.filter(p => !p._placeholder).length}개</span>
+        {canEdit && (
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input placeholder="새 매장명" value={newStore} onChange={e => setNewStore(e.target.value)} style={{ ...inpStyle, width: 130 }} onKeyDown={e => e.key === 'Enter' && submitAddStore()} />
+            <button style={{ background: C.ac, color: '#fff', border: 'none', borderRadius: 7, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }} onClick={submitAddStore}>+ 매장 추가</button>
+          </span>
+        )}
+      </div>
+
+      {stores.length === 0 && (
         <div style={{ ...card, textAlign: 'center', color: C.txm, fontSize: 13, padding: 40 }}>
-          아직 후기 체크 데이터가 없습니다. 후기체크 프로그램이 실행되면 자동으로 올라옵니다.
+          {isAdmin ? '등록된 매장이 없습니다. 위에서 매장을 추가하세요.' : '담당 매장이 없습니다. 대표님이 매장 담당을 지정하면 표시됩니다.'}
         </div>
-      ) : (
-        <>
-          <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, color: C.txd }}>📅 날짜</span>
-            <select value={date} onChange={e => setDate(e.target.value)} style={{ ...selStyle, fontSize: 13, padding: '7px 10px' }}>
-              {dates.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-            <span style={{ fontSize: 12, color: C.txm }}>매장 {stores.length}개 · 상품 {rows.length}개</span>
-          </div>
-
-          {stores.map(store => {
-            const items = byStore[store].slice().sort((a, b) => (productLabel(a) || '').localeCompare(productLabel(b) || '', 'ko', { numeric: true }));
-            const lowTotal = items.reduce((s, p) => s + (p.low_count || 0), 0);
-            const anyBad = items.some(p => !p.ok);
-            const at = items[0]?.checked_at ? String(items[0].checked_at).slice(11, 16) : '';
-            return (
-              <div key={store} style={card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <EditableName value={storeLabel(store)} canEdit={canEdit} onSave={(n) => renameStore(store, n)} style={{ fontSize: 15, fontWeight: 800, color: C.ac }} />
-                    <span style={{ fontSize: 11, color: C.txm }}>{date} {at}</span>
-                    <span style={{ fontSize: 12.5, color: lowTotal > 0 ? C.no : C.ok, fontWeight: 600 }}>
-                      {lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음'}
-                      {anyBad && <span style={{ color: C.txm, marginLeft: 6 }}>· 확인필요 있음</span>}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button onClick={() => handleCopy(store, items, at)} style={{
-                      background: copied === store ? C.ok : C.ac, color: '#fff', border: 'none',
-                      borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                    }}>{copied === store ? '✓ 복사됨' : '📋 복사하기'}</button>
-                    {isAdmin && (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 11, color: C.txd }}>담당</span>
-                        <select value={storeMap[store] || ''} onChange={e => assignOwner(store, e.target.value)} style={selStyle}>
-                          <option value="">미지정(전체)</option>
-                          {staff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </select>
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  {items.map(p => (
-                    <ProductRow key={p.id} p={p} name={productLabel(p)} canEdit={canEdit} onRename={(n) => renameProduct(p.url, n)} />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-
-          {stores.length === 0 && (
-            <div style={{ ...card, textAlign: 'center', color: C.txm, fontSize: 13 }}>
-              이 날짜에 담당 매장 데이터가 없습니다.
-            </div>
-          )}
-        </>
       )}
+
+      {stores.map(store => {
+        const items = (byStore[store] || []).filter(p => !p._placeholder).slice()
+          .sort((a, b) => (productLabel(a) || '').localeCompare(productLabel(b) || '', 'ko', { numeric: true }));
+        let lowTotal = 0, anyResult = false;
+        items.forEach(p => { const r = resultOf(p); if (r) { anyResult = true; lowTotal += (r.low_count || 0); } });
+        const firstResult = items.map(resultOf).find(Boolean);
+        const at = firstResult && firstResult.checked_at ? String(firstResult.checked_at).slice(11, 16) : '';
+        return (
+          <div key={store} style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <EditableName value={storeLabel(store)} canEdit={canEdit} onSave={(n) => renameStore(store, n)} style={{ fontSize: 15, fontWeight: 800, color: C.ac }} />
+                {at && <span style={{ fontSize: 11, color: C.txm }}>{date} {at}</span>}
+                {anyResult
+                  ? <span style={{ fontSize: 12.5, color: lowTotal > 0 ? C.no : C.ok, fontWeight: 600 }}>{lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음'}</span>
+                  : <span style={{ fontSize: 12, color: C.txm }}>이 날짜 점검 결과 없음</span>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => handleCopy(store, items, at)} style={{ background: copied === store ? C.ok : C.ac, color: '#fff', border: 'none', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                  {copied === store ? '✓ 복사됨' : '📋 복사하기'}
+                </button>
+                {isAdmin && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: C.txd }}>담당</span>
+                    <select value={storeMap[store] || ''} onChange={e => assignOwner(store, e.target.value)} style={selStyle}>
+                      <option value="">미지정(전체)</option>
+                      {staff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </span>
+                )}
+                {canEdit && <button style={{ ...smallBtn, color: C.no, borderColor: C.no + '44' }} onClick={() => removeStore(store)}>매장 삭제</button>}
+              </div>
+            </div>
+
+            <div>
+              {items.map(p => (
+                <ProductRow key={p.id} p={p} name={productLabel(p)} result={resultOf(p)} canEdit={canEdit}
+                  onRename={(n) => renameProduct(p.url, n)} onDelete={() => removeProduct(p)} />
+              ))}
+            </div>
+
+            {canEdit && (adding === store ? (
+              <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', background: C.sf2, padding: 10, borderRadius: 8 }}>
+                <input placeholder="상품명(예: 대용량세트)" value={newProd.name} onChange={e => setNewProd(p => ({ ...p, name: e.target.value }))} style={{ ...inpStyle, width: 180 }} />
+                <input placeholder="상품 URL (https://...)" value={newProd.url} onChange={e => setNewProd(p => ({ ...p, url: e.target.value }))} style={{ ...inpStyle, width: 320 }} onKeyDown={e => e.key === 'Enter' && submitAddProduct(store)} />
+                <button style={{ background: C.ok, color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }} onClick={() => submitAddProduct(store)}>추가</button>
+                <button style={smallBtn} onClick={() => { setAdding(null); setNewProd({ name: '', url: '' }); }}>취소</button>
+              </div>
+            ) : (
+              <button style={{ ...smallBtn, marginTop: 8 }} onClick={() => { setAdding(store); setNewProd({ name: '', url: '' }); }}>+ 상품 추가</button>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
