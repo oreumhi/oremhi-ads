@@ -26,6 +26,7 @@ import Conversations from './pages/Conversations';
 import Reviews from './pages/Reviews';
 import RankCheck from './pages/RankCheck';
 import Report from './pages/Report';
+import Proposals from './pages/Proposals';
 import Settings from './pages/Settings';
 
 // ─── 로딩 화면 ───
@@ -311,6 +312,7 @@ export default function App() {
       {tab === 'reviews' && <Reviews currentUser={currentUser} />}
       {tab === 'rank' && <RankCheck currentUser={currentUser} />}
       {tab === 'report' && <Report currentUser={currentUser} allowedBrands={allowedBrands} />}
+      {tab === 'proposals' && <Proposals currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );
