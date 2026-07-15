@@ -10,7 +10,7 @@ import { C } from '../config';
 import { fetchAdDataForReport, fetchMappingsAll } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
-const ymd = (d) => d.toISOString().slice(0, 10);
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
 const won = (n) => '₩' + fmtNum(Math.round(n || 0));
 const growth = (cur, prev) => (prev > 0 ? (cur - prev) / prev * 100 : (cur > 0 ? 100 : 0));
