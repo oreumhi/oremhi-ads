@@ -15,6 +15,7 @@ import {
   parseKakaoExport, guessClientName,
   fetchChatUploads, findPrevUpload, insertChatUpload, deleteChatUpload,
   fetchChatScores, fetchChatContent, fetchChatNotes,
+  fetchChatRoomOwners, setChatRoomOwner, setChatRoomActive,
 } from '../chat';
 
 const card = { background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginBottom: 16 };
@@ -552,6 +553,9 @@ function AdminView({ currentUser }) {
       {/* 대표도 업로드 가능 (담당 직원 지정) */}
       <UploadSection currentUser={currentUser} isAdmin={true} staff={staff} onDone={load} />
 
+      {/* 자동수집 방 담당자 지정 */}
+      <RoomOwnerSection staff={staff} onChanged={load} />
+
       {/* 직원별 제출 현황 */}
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>직원별 현황 (최근 7일)</div>
@@ -621,6 +625,67 @@ function AdminView({ currentUser }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// 카톡 "대화 분석" 폴더에서 자동수집된 방 목록 + 담당자 지정(그때그때→기억)
+function RoomOwnerSection({ staff, onChanged }) {
+  const [rooms, setRooms] = useState([]);
+  const [busy, setBusy] = useState('');
+
+  const load = useCallback(async () => {
+    setRooms(await fetchChatRoomOwners());
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const assign = async (room, ownerId) => {
+    setBusy(room.room_name);
+    const person = (staff || []).find(u => u.id === ownerId);
+    await setChatRoomOwner(room.room_name, ownerId || null, person ? person.name : null, room.client_name);
+    await load(); onChanged && onChanged(); setBusy('');
+  };
+  const toggle = async (room) => {
+    setBusy(room.room_name);
+    await setChatRoomActive(room.room_name, !room.active);
+    await load(); setBusy('');
+  };
+
+  const unassigned = rooms.filter(r => r.active && !r.owner_id).length;
+
+  return (
+    <div style={card}>
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>자동수집 방 · 담당자 지정</div>
+      <div style={{ fontSize: 12, color: C.txd, marginBottom: 10 }}>
+        매일 아침 카톡 "대화 분석" 폴더의 방들이 자동으로 올라옵니다. 방마다 담당 직원을 한 번 지정하면 다음부터 자동 적용됩니다.
+        {unassigned > 0 && <span style={{ color: C.warn, fontWeight: 700 }}> · 담당자 미지정 {unassigned}개</span>}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><th style={th}>카톡방</th><th style={th}>광고주</th><th style={th}>담당 직원</th><th style={th}>수집</th></tr></thead>
+          <tbody>
+            {rooms.map(r => (
+              <tr key={r.room_name} style={{ opacity: r.active ? 1 : 0.45 }}>
+                <td style={{ ...td, fontWeight: 600 }}>{r.room_name}</td>
+                <td style={{ ...td, color: C.txd }}>{r.client_name || '-'}</td>
+                <td style={td}>
+                  <select style={selStyle} disabled={busy === r.room_name}
+                    value={r.owner_id || ''} onChange={e => assign(r, e.target.value)}>
+                    <option value="">— 미지정 —</option>
+                    {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </select>
+                </td>
+                <td style={td}>
+                  <button style={{ ...btnGhost, color: r.active ? C.ok : C.no }} onClick={() => toggle(r)}>
+                    {r.active ? '수집중' : '제외됨'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {rooms.length === 0 && <tr><td colSpan={4} style={{ ...td, color: C.txm }}>아직 자동수집된 방이 없습니다. 프로그램이 처음 실행되면 여기에 방 목록이 나타납니다.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
