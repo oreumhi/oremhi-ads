@@ -234,3 +234,38 @@ export async function deleteReviewStore(store) {
   const { error } = await sb.from('review_products').delete().eq('store', store);
   return !error;
 }
+
+// ═══════════════════════════════════════════
+// 대화 자동수집: 방별 담당자 기억 (chat_room_owner)
+// 카톡 "대화 분석" 폴더의 방을 자동 내보내기할 때 담당자를 기억
+// ═══════════════════════════════════════════
+
+export async function fetchChatRoomOwners() {
+  if (!sb) return [];
+  const { data, error } = await sb.from('chat_room_owner')
+    .select('*').order('room_name', { ascending: true }).limit(500);
+  if (error) { console.error('[chat_room_owner] 조회:', error.message); return []; }
+  return data || [];
+}
+
+// 방 담당자 지정(그때그때) → 기억. 기존 업로드/점수의 담당자도 함께 갱신.
+export async function setChatRoomOwner(roomName, ownerId, staffName, clientName) {
+  if (!sb || !roomName) return false;
+  const up = await sb.from('chat_room_owner').upsert(
+    { room_name: roomName, owner_id: ownerId || null, staff_name: staffName || null,
+      client_name: clientName || null, active: true, updated_at: new Date().toISOString() },
+    { onConflict: 'room_name' });
+  if (up.error) { console.error('[chat_room_owner] 저장:', up.error.message); return false; }
+  // 이미 올라온 이 방의 업로드에도 담당자 반영
+  await sb.from('chat_uploads').update({ owner_id: ownerId || null, uploader_name: staffName || '자동수집' })
+    .eq('room_name', roomName);
+  return true;
+}
+
+// 방을 자동수집 대상에서 제외/포함
+export async function setChatRoomActive(roomName, active) {
+  if (!sb || !roomName) return false;
+  const { error } = await sb.from('chat_room_owner')
+    .update({ active: !!active, updated_at: new Date().toISOString() }).eq('room_name', roomName);
+  return !error;
+}
