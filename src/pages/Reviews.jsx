@@ -85,6 +85,7 @@ function ProductRow({ p, name, canEdit, onRename }) {
 export default function Reviews({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
   const ownerId = currentUser?.id;
+  const canEdit = !!currentUser; // 대표+직원 모두 이름 수정 가능
 
   const [dates, setDates] = useState([]);
   const [date, setDate] = useState('');
@@ -145,7 +146,7 @@ export default function Reviews({ currentUser }) {
       <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>후기 체크</div>
       <div style={{ fontSize: 12, color: C.txd, marginBottom: 16 }}>
         매장·상품별 상위 후기 중 저평점(별점 3 이하)이 상단에 있는지 매일 자동 점검합니다.
-        {isAdmin && ' 매장명·상품명 옆 ✏️로 이름을 바꾸면 앞으로도 그 이름으로 표시됩니다.'}
+        {' 매장명·상품명 옆 ✏️로 이름을 바꾸면 앞으로도 그 이름으로 표시됩니다.'}
       </div>
 
       {dates.length === 0 ? (
@@ -171,7 +172,7 @@ export default function Reviews({ currentUser }) {
               <div key={store} style={card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <EditableName value={storeLabel(store)} canEdit={isAdmin} onSave={(n) => renameStore(store, n)} style={{ fontSize: 15, fontWeight: 800, color: C.ac }} />
+                    <EditableName value={storeLabel(store)} canEdit={canEdit} onSave={(n) => renameStore(store, n)} style={{ fontSize: 15, fontWeight: 800, color: C.ac }} />
                     <span style={{ fontSize: 11, color: C.txm }}>{date} {at}</span>
                     <span style={{ fontSize: 12.5, color: lowTotal > 0 ? C.no : C.ok, fontWeight: 600 }}>
                       {lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음'}
@@ -190,7 +191,7 @@ export default function Reviews({ currentUser }) {
                 </div>
                 <div>
                   {items.map(p => (
-                    <ProductRow key={p.id} p={p} name={productLabel(p)} canEdit={isAdmin} onRename={(n) => renameProduct(p.url, n)} />
+                    <ProductRow key={p.id} p={p} name={productLabel(p)} canEdit={canEdit} onRename={(n) => renameProduct(p.url, n)} />
                   ))}
                 </div>
               </div>
