@@ -304,7 +304,7 @@ export default function App() {
   return (
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
       {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
-      {tab === 'overview' && <Overview data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
+      {tab === 'overview' && <Overview data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} currentUser={currentUser} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} removeBrand={removeBrand} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'chat' && <Conversations currentUser={currentUser} />}
