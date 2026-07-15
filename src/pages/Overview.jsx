@@ -8,6 +8,7 @@
 import React, { useState, useMemo } from 'react';
 import { C, RANGES, AD_TYPE_ORDER, AD_TYPE_COLORS } from '../config';
 import { fmtWon, fmtNum, fmt, filterByRange, sumMetrics, calcCtr, calcCpa, calcRoas } from '../utils';
+import TodayAlerts from '../components/TodayAlerts';
 
 const th = { padding: '9px 12px', textAlign: 'right', fontSize: 11, color: '#8890a6', fontWeight: 700, borderBottom: '1px solid #282d40', whiteSpace: 'nowrap' };
 const thL = { ...th, textAlign: 'left' };
@@ -51,7 +52,7 @@ const HeaderRow = () => (
   </thead>
 );
 
-export default function Overview({ data, allowedBrands, changeRange, rangeLoading }) {
+export default function Overview({ data, allowedBrands, changeRange, rangeLoading, currentUser }) {
   const { adData, mappings } = data;
   const [range, setRange] = useState(7);
   const [view, setView] = useState('brand'); // 'brand' | 'media'
@@ -106,6 +107,9 @@ export default function Overview({ data, allowedBrands, changeRange, rangeLoadin
           ))}
         </div>
       </div>
+
+      {/* 오늘 챙길 것 (이상 감지 알림) */}
+      <TodayAlerts currentUser={currentUser} allowedBrands={allowedBrands} />
 
       {/* 전체 요약 카드 */}
       <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 14 }}>
