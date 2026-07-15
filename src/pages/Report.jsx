@@ -129,6 +129,7 @@ export default function Report({ currentUser, allowedBrands }) {
   const [mappings, setMappings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
+  const [changeLog, setChangeLog] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -181,6 +182,14 @@ export default function Report({ currentUser, allowedBrands }) {
     const g = {};
     thisRows.forEach(r => { const k = r._label + '|' + r._type; (g[k] = g[k] || { label: r._label, type: r._type, rows: [] }).rows.push(r); });
     return Object.values(g).map(x => ({ ...x, m: sumM(x.rows) })).sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 8);
+  }, [thisRows]);
+
+  const wasteAds = useMemo(() => {
+    const g = {};
+    thisRows.forEach(r => { const k = r._label + '|' + r._type; (g[k] = g[k] || { label: r._label, type: r._type, rows: [] }).rows.push(r); });
+    return Object.values(g).map(x => ({ ...x, m: sumM(x.rows) }))
+      .filter(x => x.m.cost >= 20000 && x.m.conversions === 0)
+      .sort((a, b) => b.m.cost - a.m.cost).slice(0, 6);
   }, [thisRows]);
 
   const summary = useMemo(() => {
@@ -321,6 +330,23 @@ export default function Report({ currentUser, allowedBrands }) {
                 { v: won(a.m.cost), color: R.warn }, { v: num(a.m.conversions), color: R.ok, bold: true }, { v: cvrOf(a.m).toFixed(1) + '%' },
                 { v: won(a.m.revenue), color: R.pink }, { v: roasStr(roasOf(a.m)), bold: true },
               ] })).map(r => ({ label: r.label, cells: r.cells }))} />
+          </Section>
+
+          {/* 낭비 의심 광고 */}
+          {wasteAds.length > 0 && (
+            <Section title="낭비 의심 광고 (비용 발생·전환 0)" sub="비용은 나갔지만 이번 기간 전환이 없었던 광고입니다. 소재·키워드·랜딩 점검 또는 예산 재배분 대상입니다.">
+              <MetricTable head={['광고', '유형', '노출', '클릭', 'CTR', '광고비', '전환']}
+                rows={wasteAds.map(a => ({ label: a.label, cells: [
+                  { v: a.type, color: R.sub }, { v: num(a.m.impressions) }, { v: num(a.m.clicks) }, { v: ctrOf(a.m).toFixed(2) + '%' },
+                  { v: won(a.m.cost), color: R.no, bold: true }, { v: '0', color: R.no },
+                ] }))} />
+            </Section>
+          )}
+
+          {/* 변경 이력 */}
+          <Section title="이번 기간 변경 이력" sub="무엇을, 왜 바꿨는지 적어주세요 (예: OO 키워드 입찰 인상, XX 소재 교체). 인쇄 시 함께 나갑니다.">
+            <textarea value={changeLog} onChange={e => setChangeLog(e.target.value)} placeholder="예) 7/12 '남자팬티' 입찰 +10% / 7/14 리타겟 소재 2종 교체 / 7/15 효율 낮은 쇼핑 캠페인 예산 -20%"
+              style={{ width: '100%', minHeight: 70, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </Section>
 
           {/* 코멘트 */}
