@@ -22,6 +22,7 @@ export const TABS = [
   { id: 'chat',      label: '대화 분석', icon: '💬' },
   { id: 'reviews',   label: '후기 체크', icon: '⭐' },
   { id: 'rank',      label: '순위 체크', icon: '🏆' },
+  { id: 'report',    label: '광고주 리포트', icon: '📄' },
   { id: 'settings',  label: '설정', icon: '⚙️' },
 ];
 
