@@ -21,6 +21,7 @@ export const TABS = [
   { id: 'mapping',   label: '매핑 관리', icon: '🔗' },
   { id: 'chat',      label: '대화 분석', icon: '💬' },
   { id: 'reviews',   label: '후기 체크', icon: '⭐' },
+  { id: 'rank',      label: '순위 체크', icon: '🏆' },
   { id: 'settings',  label: '설정', icon: '⚙️' },
 ];
 
@@ -133,8 +134,4 @@ export function labelFromMatchKey(matchKey, groupName, materialId, campaignName)
     return materialId || matchKey.split('||')[1];
   }
   if (matchKey.startsWith('PL||') || matchKey.startsWith('BR||')) {
-    return groupName || matchKey.split('||')[2];
-  }
-
-  return groupName || materialId || matchKey;
-}
+    return groupName || matchKey.split('|
