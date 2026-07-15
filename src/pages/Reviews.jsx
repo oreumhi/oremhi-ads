@@ -22,6 +22,40 @@ const penBtn = { background: 'none', border: 'none', color: C.txm, cursor: 'poin
 
 const openUrl = (u) => { try { window.open(u, '_blank', 'noopener'); } catch { /* ignore */ } };
 
+// 클립보드 복사 (실패 시 임시 textarea 폴백)
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+  } catch { return false; }
+}
+
+// 매장 1개를 카톡용 텍스트로 (지금 화면 그대로, 전체 상품)
+function buildStoreText(storeName, items, dateStr, at, productName) {
+  const lines = [];
+  const lowTotal = items.reduce((s, p) => s + (p.low_count || 0), 0);
+  lines.push(`[후기체크·${storeName}] ${dateStr}${at ? ' ' + at : ''}`);
+  lines.push(lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음');
+  for (const p of items) {
+    const nm = productName(p);
+    if (!p.ok) { lines.push(`· ${nm} ❓ ${p.note || '확인 필요'}`); continue; }
+    const lows = p.lows || [];
+    if (lows.length > 0) {
+      const detail = lows.map(([pos, rat]) => `${pos}번째 ★${rat}`).join(', ');
+      lines.push(`· ${nm} ⚠️ ${detail}`);
+      if (p.url) lines.push(`  ${p.url}`);
+    } else {
+      lines.push(`· ${nm} ✅`);
+    }
+  }
+  return lines.join('\n');
+}
+
 function Star({ n }) {
   const col = n <= 1 ? C.no : n <= 2 ? C.warn : C.yel;
   return <span style={{ color: col, fontWeight: 700 }}>★{n}</span>;
@@ -94,6 +128,7 @@ export default function Reviews({ currentUser }) {
   const [storeMap, setStoreMap] = useState({}); // store -> owner_id
   const [alias, setAlias] = useState({ products: {}, stores: {} });
   const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(null); // 복사된 매장명
 
   // 날짜 목록 + 별칭 로드
   useEffect(() => {
@@ -134,6 +169,14 @@ export default function Reviews({ currentUser }) {
   const renameProduct = async (url, name) => {
     setAlias(prev => ({ ...prev, products: { ...prev.products, [url]: name } }));
     await setProductAlias(url, name);
+  };
+
+  // 복사하기: 매장 전체를 카톡용 텍스트로 복사
+  const handleCopy = async (store, items, at) => {
+    const text = buildStoreText(storeLabel(store), items, date, at, productLabel);
+    const ok = await copyText(text);
+    if (ok) { setCopied(store); setTimeout(() => setCopied(null), 2000); }
+    else { alert('복사에 실패했습니다. 브라우저 권한을 확인해주세요.'); }
   };
 
   const storeLabel = (s) => alias.stores[s] || s;
@@ -179,15 +222,21 @@ export default function Reviews({ currentUser }) {
                       {anyBad && <span style={{ color: C.txm, marginLeft: 6 }}>· 확인필요 있음</span>}
                     </span>
                   </div>
-                  {isAdmin && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 11, color: C.txd }}>담당</span>
-                      <select value={storeMap[store] || ''} onChange={e => assignOwner(store, e.target.value)} style={selStyle}>
-                        <option value="">미지정(전체)</option>
-                        {staff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                      </select>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button onClick={() => handleCopy(store, items, at)} style={{
+                      background: copied === store ? C.ok : C.ac, color: '#fff', border: 'none',
+                      borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                    }}>{copied === store ? '✓ 복사됨' : '📋 복사하기'}</button>
+                    {isAdmin && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 11, color: C.txd }}>담당</span>
+                        <select value={storeMap[store] || ''} onChange={e => assignOwner(store, e.target.value)} style={selStyle}>
+                          <option value="">미지정(전체)</option>
+                          {staff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div>
                   {items.map(p => (
