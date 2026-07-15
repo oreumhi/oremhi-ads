@@ -492,3 +492,11 @@ export function useStore(currentUser) {
 
   return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange };
 }
+
+// ─── 광고주 리포트용 데이터 조회 ───
+export async function fetchAdDataForReport(rangeDays, ownerId) {
+  return ownerId ? fetchAdDataByRangeAndOwner(rangeDays, ownerId) : fetchAdDataByRange(rangeDays);
+}
+export async function fetchMappingsAll() {
+  return await fetchAll('mappings');
+}
