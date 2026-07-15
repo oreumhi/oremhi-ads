@@ -204,3 +204,33 @@ export async function setStoreAlias(store, name) {
     { store, display_name: name || null, updated_at: new Date().toISOString() }, { onConflict: 'store' });
   return !error;
 }
+
+// ─── 후기 대상 매장/상품 관리 (review_products) ───
+export async function fetchReviewProducts() {
+  if (!sb) return [];
+  const { data, error } = await sb.from('review_products').select('*').eq('active', true).order('store').order('sort_order').limit(2000);
+  if (error) { console.error('[review_products] 조회:', error.message); return []; }
+  return data || [];
+}
+
+export async function addReviewProduct({ store, name, url }) {
+  if (!sb || !store || !url) return { ok: false, msg: '매장과 URL은 필수입니다' };
+  const id = uid();
+  const { error } = await sb.from('review_products').upsert(
+    { id, store, name: name || '', url, active: true }, { onConflict: 'url' });
+  if (error) return { ok: false, msg: error.message };
+  return { ok: true };
+}
+
+export async function deleteReviewProduct(url) {
+  if (!sb || !url) return false;
+  const { error } = await sb.from('review_products').delete().eq('url', url);
+  return !error;
+}
+
+// 매장 전체 삭제 (그 매장의 상품 목록 제거 → 다음 실행부터 점검 안 함)
+export async function deleteReviewStore(store) {
+  if (!sb || !store) return false;
+  const { error } = await sb.from('review_products').delete().eq('store', store);
+  return !error;
+}
