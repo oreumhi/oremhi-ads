@@ -24,6 +24,7 @@ import Upload from './pages/Upload';
 import Mapping from './pages/Mapping';
 import Conversations from './pages/Conversations';
 import Reviews from './pages/Reviews';
+import RankCheck from './pages/RankCheck';
 import Settings from './pages/Settings';
 
 // ─── 로딩 화면 ───
@@ -307,6 +308,7 @@ export default function App() {
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} removeBrand={removeBrand} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'chat' && <Conversations currentUser={currentUser} />}
       {tab === 'reviews' && <Reviews currentUser={currentUser} />}
+      {tab === 'rank' && <RankCheck currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );
@@ -314,4 +316,4 @@ export default function App() {
 
 // ─── 공통 스타일 ───
 const inp = { background:'#1a1e2c', border:'1px solid #282d40', borderRadius:8, padding:'12px 14px', color:'#e4e7ed', fontSize:14, outline:'none', width:'100%', boxSizing:'border-box' };
-const btnPrimary = { background:'#5b8def', color:'#fff', border:'none', borderRadius:8, padding:'12px 0', cursor:'pointer', fontWeight:600, fontSize:15, width:'100%', marginTop:4 };
+const btnPrimary = { background:'#5b8def', color:'#fff', border:'none', b
