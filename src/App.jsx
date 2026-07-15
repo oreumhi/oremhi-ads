@@ -23,6 +23,7 @@ import Overview from './pages/Overview';
 import Upload from './pages/Upload';
 import Mapping from './pages/Mapping';
 import Conversations from './pages/Conversations';
+import Reviews from './pages/Reviews';
 import Settings from './pages/Settings';
 
 // ─── 로딩 화면 ───
@@ -305,6 +306,7 @@ export default function App() {
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} />}
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} removeBrand={removeBrand} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'chat' && <Conversations currentUser={currentUser} />}
+      {tab === 'reviews' && <Reviews currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );
