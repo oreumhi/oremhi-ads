@@ -17,7 +17,7 @@ const won = (n) => '₩' + fmtNum(Math.round(n || 0));
 const num = (n) => fmtNum(Math.round(n || 0));
 const pct = (n, d = 1) => (n == null ? '-' : (n).toFixed(d) + '%');
 
-const ymd = (d) => d.toISOString().slice(0, 10);
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const addDays = (dateStr, n) => { const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
 const kdate = (s) => s ? s.replace(/-/g, '.').slice(2) : '';
 
