@@ -20,6 +20,7 @@ export const TABS = [
   { id: 'upload',    label: '보고서 업로드', icon: '📤' },
   { id: 'mapping',   label: '매핑 관리', icon: '🔗' },
   { id: 'chat',      label: '대화 분석', icon: '💬' },
+  { id: 'reviews',   label: '후기 체크', icon: '⭐' },
   { id: 'settings',  label: '설정', icon: '⚙️' },
 ];
 
