@@ -134,4 +134,8 @@ export function labelFromMatchKey(matchKey, groupName, materialId, campaignName)
     return materialId || matchKey.split('||')[1];
   }
   if (matchKey.startsWith('PL||') || matchKey.startsWith('BR||')) {
-    return groupName || matchKey.split('|
+    return groupName || matchKey.split('||')[2];
+  }
+
+  return groupName || materialId || matchKey;
+}
