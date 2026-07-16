@@ -138,6 +138,7 @@ function Section({ title, sub, children }) {
 export default function Report({ currentUser, allowedBrands }) {
   const isAdmin = currentUser?.role === 'admin';
   const [ptype, setPtype] = useState('weekly');
+  const [channel, setChannel] = useState('search'); // 'search' | 'gfa'
   const [refDate, setRefDate] = useState(addDays(ymd(new Date()), -1));
   const [brand, setBrand] = useState('');
   const [adData, setAdData] = useState([]);
@@ -188,11 +189,13 @@ export default function Report({ currentUser, allowedBrands }) {
 
     const rowsOf = (from, to) => adData.filter(r => {
     const mp = mapByKey[r.match_key];
-    return mp && mp.brand === brand && r.date >= from && r.date <= to;
-  }).map(r => ({ ...r, _type: normType(mapByKey[r.match_key]?.ad_type), _label: mapByKey[r.match_key]?.label || r.group_name || r.material_id || '-', _product: mapByKey[r.match_key]?.product }));
+    if (!mp || mp.brand !== brand || r.date < from || r.date > to) return false;
+    const isGfa = r.source === 'gfa' || (mp.ad_type || '').startsWith('GFA');
+    return channel === 'gfa' ? isGfa : !isGfa;
+  }).map(r => { const mp = mapByKey[r.match_key]; return { ...r, _type: channel === 'gfa' ? (mp.ad_type || 'GFA') : normType(mp.ad_type), _label: mp.label || r.group_name || r.material_id || '-', _product: mp.product }; });
 
-  const thisRows = useMemo(() => rowsOf(thisFrom, thisTo), [adData, mapByKey, brand, thisFrom, thisTo]);
-  const prevRows = useMemo(() => rowsOf(prevFrom, prevTo), [adData, mapByKey, brand, prevFrom, prevTo]);
+  const thisRows = useMemo(() => rowsOf(thisFrom, thisTo), [adData, mapByKey, brand, thisFrom, thisTo, channel]);
+  const prevRows = useMemo(() => rowsOf(prevFrom, prevTo), [adData, mapByKey, brand, prevFrom, prevTo, channel]);
   const cur = sumM(thisRows), prev = sumM(prevRows);
 
   const daily = useMemo(() => {
@@ -211,7 +214,8 @@ export default function Report({ currentUser, allowedBrands }) {
   const byType = useMemo(() => {
     const g = {};
     thisRows.forEach(r => (g[r._type] = g[r._type] || []).push(r));
-    return TYPE_ORDER.filter(t => g[t]).map(t => ({ type: t, m: sumM(g[t]) }));
+    const keys = Object.keys(g).sort((a, b) => ((TYPE_ORDER.indexOf(a) + 1) || 99) - ((TYPE_ORDER.indexOf(b) + 1) || 99) || a.localeCompare(b));
+    return keys.map(t => ({ type: t, m: sumM(g[t]) }));
   }, [thisRows]);
 
   const topAds = useMemo(() => {
@@ -267,13 +271,13 @@ export default function Report({ currentUser, allowedBrands }) {
   const kakaoText = useMemo(() => {
     if (!thisRows.length) return '';
     return [
-      `[${brand}] ${P.label} 광고 리포트 (${kdate(thisFrom)}~${kdate(thisTo)})`,
+      `[${brand}] ${channel === 'gfa' ? '디스플레이' : '검색'}광고 ${P.label} 리포트 (${kdate(thisFrom)}~${kdate(thisTo)})`,
       `· 광고비 ${won(cur.cost)}  · 매출 ${won(cur.revenue)}`,
       `· ROAS ${roasStr(roasOf(cur))}  · 전환 ${num(cur.conversions)}건 (전환율 ${cvrOf(cur).toFixed(1)}%)`,
       `· 클릭 ${num(cur.clicks)}  · CTR ${ctrOf(cur).toFixed(2)}%  · CPC ${won(cpcOf(cur))}`,
       `(전기간 대비 매출 ${growth(cur.revenue, prev.revenue) >= 0 ? '+' : ''}${growth(cur.revenue, prev.revenue).toFixed(0)}%, ROAS ${growth(roasOf(cur), roasOf(prev)) >= 0 ? '+' : ''}${growth(roasOf(cur), roasOf(prev)).toFixed(0)}%)`,
     ].join('\n');
-  }, [thisRows, brand, cur, prev, thisFrom, thisTo, P.label]);
+  }, [thisRows, brand, cur, prev, thisFrom, thisTo, P.label, channel]);
 
   const copyKakao = async () => { try { await navigator.clipboard.writeText(kakaoText); alert('카톡용 요약을 복사했습니다.'); } catch { alert('복사 실패'); } };
 
@@ -319,6 +323,7 @@ export default function Report({ currentUser, allowedBrands }) {
         <div style={{ fontSize: 12, color: '#8890a6', marginBottom: 12 }}>브랜드·기간을 고르면 광고주에게 보낼 리포트가 생성됩니다. 인쇄(PDF)하거나 카톡 요약을 복사하세요.</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <select value={brand} onChange={e => setBrand(e.target.value)} style={{ ...btn, minWidth: 140 }}>{brands.map(b => <option key={b} value={b}>{b}</option>)}</select>
+          <div style={{ display: 'flex', gap: 4 }}>{[['search', '검색광고'], ['gfa', '디스플레이(GFA)']].map(([k, l]) => <button key={k} onClick={() => setChannel(k)} style={channel === k ? btnOn : btn}>{l}</button>)}</div>
           <div style={{ display: 'flex', gap: 4 }}>{Object.entries(PERIODS).map(([k, v]) => <button key={k} onClick={() => setPtype(k)} style={ptype === k ? btnOn : btn}>{v.label}</button>)}</div>
           <input type="date" value={refDate} max={ymd(new Date())} onChange={e => setRefDate(e.target.value)} style={btn} />
           <div style={{ flex: 1 }} />
@@ -339,7 +344,7 @@ export default function Report({ currentUser, allowedBrands }) {
             <div>
               <div style={{ fontSize: 13, opacity: 0.9, letterSpacing: 1 }}>OREUMHI · 광고 성과 리포트</div>
               <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{brand}</div>
-              <div style={{ fontSize: 14, opacity: 0.95, marginTop: 2 }}>{P.label} 광고 성과 리포트</div>
+              <div style={{ fontSize: 14, opacity: 0.95, marginTop: 2 }}>{channel === 'gfa' ? '디스플레이광고(GFA)' : '검색광고'} · {P.label} 성과 리포트</div>
             </div>
             <div style={{ textAlign: 'right', fontSize: 13, opacity: 0.95 }}>
               <div style={{ fontWeight: 700 }}>{kdate(thisFrom)} ~ {kdate(thisTo)}</div>
@@ -399,8 +404,8 @@ export default function Report({ currentUser, allowedBrands }) {
               ] })).map(r => ({ label: r.label, cells: r.cells }))} />
           </Section>
 
-          {/* 키워드 인사이트 */}
-          {kwAgg.length > 0 && (
+          {/* 키워드 인사이트 (검색광고만) */}
+          {channel === 'search' && kwAgg.length > 0 && (
             <Section title="키워드 인사이트" sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
                 <div>
@@ -424,8 +429,8 @@ export default function Report({ currentUser, allowedBrands }) {
             </Section>
           )}
 
-          {/* 매체별 (PC/모바일) */}
-          {deviceRows.length > 0 && (
+          {/* 매체별 (검색광고만) */}
+          {channel === 'search' && deviceRows.length > 0 && (
             <Section title="매체별 성과 (PC / 모바일)">
               <MetricTable head={['매체', '노출', '클릭', 'CTR', 'CPC', '광고비', '전환', 'CVR', '매출', 'ROAS', '비중']}
                 rows={[...deviceRows.map(d => typeRowFull(d.device, d.m, false)),
@@ -433,8 +438,8 @@ export default function Report({ currentUser, allowedBrands }) {
             </Section>
           )}
 
-          {/* 시간대별 */}
-          {hasHour && (
+          {/* 시간대별 (검색광고만) */}
+          {channel === 'search' && hasHour && (
             <Section title="시간대별 성과" sub={`전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)`}>
               <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}><HourBars hours={hourAgg} /></div>
             </Section>
