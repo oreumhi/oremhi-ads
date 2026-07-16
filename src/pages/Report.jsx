@@ -5,7 +5,7 @@
 // ============================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchAdDataForReport, fetchMappingsAll } from '../store';
+import { fetchAdDataForReport, fetchMappingsAll, fetchReportKeyword, fetchReportMedia, fetchReportHour } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
 const R = {
@@ -24,6 +24,7 @@ const sumM = (rows) => rows.reduce((a, r) => ({
   cost: a.cost + (+r.cost || 0), conversions: a.conversions + (+r.conversions || 0),
   revenue: a.revenue + (+r.conv_revenue || 0),
 }), { impressions: 0, clicks: 0, cost: 0, conversions: 0, revenue: 0 });
+const sumD = (rows) => rows.reduce((a, r) => ({ impressions: a.impressions + (+r.impressions || 0), clicks: a.clicks + (+r.clicks || 0), cost: a.cost + (+r.cost || 0), conversions: a.conversions + (+r.conversions || 0), revenue: a.revenue + (+r.revenue || 0) }), { impressions: 0, clicks: 0, cost: 0, conversions: 0, revenue: 0 });
 const ctrOf = (m) => m.impressions > 0 ? m.clicks / m.impressions * 100 : 0;
 const cpcOf = (m) => m.clicks > 0 ? m.cost / m.clicks : 0;
 const cvrOf = (m) => m.clicks > 0 ? m.conversions / m.clicks * 100 : 0;
@@ -68,6 +69,20 @@ function TrendChart({ daily }) {
       {daily.map((d, i) => (daily.length <= 16 || i % 3 === 0) && (
         <text key={i} x={x(i) + bw / 2} y={H - 8} fontSize="10" fill={R.sub} textAnchor="middle">{d.date.slice(5)}</text>
       ))}
+    </svg>
+  );
+}
+
+function HourBars({ hours }) {
+  const W = 720, H = 150, PB = 22, PT = 6, PL = 6, PR = 6;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const maxc = Math.max(1, ...hours.map(h => h.cost));
+  const bw = iw / 24;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      {hours.map((h, i) => { const bh = (h.cost / maxc) * ih; const hot = h.cost >= maxc * 0.6;
+        return <rect key={i} x={PL + i * bw + bw * 0.15} y={PT + ih - bh} width={bw * 0.7} height={bh} rx="2" fill={hot ? R.ac : R.warn} opacity={hot ? 0.9 : 0.5} />; })}
+      {hours.map((h, i) => i % 3 === 0 && <text key={i} x={PL + i * bw + bw / 2} y={H - 7} fontSize="9" fill={R.sub} textAnchor="middle">{h.hour_num}시</text>)}
     </svg>
   );
 }
@@ -130,6 +145,9 @@ export default function Report({ currentUser, allowedBrands }) {
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
   const [changeLog, setChangeLog] = useState('');
+  const [kwData, setKwData] = useState([]);
+  const [mediaData, setMediaData] = useState([]);
+  const [hourData, setHourData] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,7 +168,25 @@ export default function Report({ currentUser, allowedBrands }) {
   const thisFrom = addDays(refDate, -(P.n - 1)), thisTo = refDate;
   const prevFrom = addDays(refDate, -(2 * P.n - 1)), prevTo = addDays(refDate, -P.n);
 
-  const rowsOf = (from, to) => adData.filter(r => {
+  useEffect(() => {
+    let alive = true;
+    const oid = isAdmin ? null : currentUser.id;
+    Promise.all([
+      fetchReportKeyword(oid, thisFrom, thisTo), fetchReportMedia(oid, thisFrom, thisTo), fetchReportHour(oid, thisFrom, thisTo),
+    ]).then(([k, m, h]) => { if (alive) { setKwData(k); setMediaData(m); setHourData(h); } });
+    return () => { alive = false; };
+  }, [thisFrom, thisTo, isAdmin, currentUser]);
+
+  // 브랜드 매핑용 (캠페인→브랜드, 광고그룹→브랜드)
+  const campByBrand = useMemo(() => { const m = {}; mappings.forEach(x => { if (x.campaign_name && !m[x.campaign_name]) m[x.campaign_name] = x.brand; }); return m; }, [mappings]);
+  const groupByBrand = useMemo(() => {
+    const m = {};
+    mappings.forEach(x => { const p = (x.match_key || '').split('||'); if ((p[0] === 'PL' || p[0] === 'BR') && p[2] && !m[p[2]]) m[p[2]] = x.brand; if (x.label && !m[x.label]) m[x.label] = x.brand; });
+    return m;
+  }, [mappings]);
+  const acctBase = (a) => (a || '').replace(/_(SA|GFA|통합).*$/,'').replace(/\(.*\)/,'').trim();
+
+    const rowsOf = (from, to) => adData.filter(r => {
     const mp = mapByKey[r.match_key];
     return mp && mp.brand === brand && r.date >= from && r.date <= to;
   }).map(r => ({ ...r, _type: normType(mapByKey[r.match_key]?.ad_type), _label: mapByKey[r.match_key]?.label || r.group_name || r.material_id || '-', _product: mapByKey[r.match_key]?.product }));
@@ -192,6 +228,29 @@ export default function Report({ currentUser, allowedBrands }) {
       .sort((a, b) => b.m.cost - a.m.cost).slice(0, 6);
   }, [thisRows]);
 
+  // ─── 키워드/매체/시간대 집계 (선택 브랜드) ───
+  const kwAgg = useMemo(() => {
+    const g = {};
+    kwData.forEach(r => { if (campByBrand[r.campaign] !== brand) return; const k = r.keyword || '-'; (g[k] = g[k] || { keyword: k, rows: [] }).rows.push(r); });
+    return Object.values(g).map(x => ({ keyword: x.keyword, m: sumD(x.rows) })).filter(x => x.keyword && x.keyword !== '-');
+  }, [kwData, campByBrand, brand]);
+  const topKw = useMemo(() => kwAgg.slice().sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 10), [kwAgg]);
+  const wasteKw = useMemo(() => kwAgg.filter(x => x.m.cost >= 3000 && x.m.conversions === 0).sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
+  const deviceRows = useMemo(() => {
+    const g = {};
+    mediaData.forEach(r => { if (groupByBrand[r.adgroup] !== brand) return; (g[r.device] = g[r.device] || []).push(r); });
+    return ['PC', '모바일'].filter(d => g[d]).map(d => ({ device: d, m: sumD(g[d]) }));
+  }, [mediaData, groupByBrand, brand]);
+  const hourAgg = useMemo(() => {
+    const rows = hourData.filter(r => { const b = acctBase(r.account); return b && (b === brand || brand.includes(b) || b.includes(brand)); });
+    const by = {};
+    for (let h = 0; h < 24; h++) by[h] = { hour_num: h, cost: 0, conversions: 0, clicks: 0, impressions: 0, revenue: 0 };
+    rows.forEach(r => { const b = by[r.hour_num]; if (b) { b.cost += +r.cost || 0; b.conversions += +r.conversions || 0; b.clicks += +r.clicks || 0; b.impressions += +r.impressions || 0; b.revenue += +r.revenue || 0; } });
+    return Object.values(by);
+  }, [hourData, brand]);
+  const hasHour = useMemo(() => hourAgg.some(h => h.impressions > 0), [hourAgg]);
+  const topHours = useMemo(() => hourAgg.slice().filter(h => h.cost > 0).sort((a, b) => b.conversions - a.conversions || b.cost - a.cost).slice(0, 3), [hourAgg]);
+
   const summary = useMemo(() => {
     if (!thisRows.length) return '';
     const gRoas = growth(roasOf(cur), roasOf(prev)), gRev = growth(cur.revenue, prev.revenue), gCost = growth(cur.cost, prev.cost), gConv = growth(cur.conversions, prev.conversions);
@@ -220,6 +279,14 @@ export default function Report({ currentUser, allowedBrands }) {
 
   const btn = { padding: '8px 14px', borderRadius: 8, border: '1px solid #2b3350', background: '#1a1e2c', color: '#cfd6e6', cursor: 'pointer', fontSize: 13 };
   const btnOn = { ...btn, background: '#3a6ff0', color: '#fff', border: 'none', fontWeight: 700 };
+
+  const devTotalCost = deviceRows.reduce((s, d) => s + d.m.cost, 0) || 1;
+  const typeRowFull = (label, m, hl) => ({ label, hl, bold: hl, cells: [
+    { v: num(m.impressions) }, { v: num(m.clicks) }, { v: ctrOf(m).toFixed(2) + '%' }, { v: won(cpcOf(m)), color: R.sub },
+    { v: won(m.cost), color: R.warn, bold: true }, { v: num(m.conversions), color: R.ok, bold: true }, { v: cvrOf(m).toFixed(1) + '%' },
+    { v: won(m.revenue), color: R.pink }, { v: roasStr(roasOf(m)), color: roasOf(m) >= 300 ? R.ok : roasOf(m) < 100 ? R.no : R.ink, bold: true },
+    { v: (m.cost / devTotalCost * 100).toFixed(0) + '%', color: R.sub },
+  ] });
 
   // 기간 비교표 행
   const cmpRows = METRICS.map(mt => {
@@ -331,6 +398,47 @@ export default function Report({ currentUser, allowedBrands }) {
                 { v: won(a.m.revenue), color: R.pink }, { v: roasStr(roasOf(a.m)), bold: true },
               ] })).map(r => ({ label: r.label, cells: r.cells }))} />
           </Section>
+
+          {/* 키워드 인사이트 */}
+          {kwAgg.length > 0 && (
+            <Section title="키워드 인사이트" sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.ok, marginBottom: 6 }}>🟢 성과 우수 키워드 (매출 기준)</div>
+                  <MetricTable head={['키워드', '클릭', '광고비', '전환', '매출', 'ROAS']}
+                    rows={topKw.map(k => ({ label: k.keyword, cells: [
+                      { v: num(k.m.clicks) }, { v: won(k.m.cost), color: R.warn }, { v: num(k.m.conversions), color: R.ok, bold: true },
+                      { v: won(k.m.revenue), color: R.pink }, { v: roasStr(roasOf(k.m)), bold: true },
+                    ] }))} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.no, marginBottom: 6 }}>🔴 낭비 의심 키워드 (비용·전환 0)</div>
+                  {wasteKw.length ? (
+                    <MetricTable head={['키워드', '노출', '클릭', 'CTR', '광고비']}
+                      rows={wasteKw.map(k => ({ label: k.keyword, cells: [
+                        { v: num(k.m.impressions) }, { v: num(k.m.clicks) }, { v: ctrOf(k.m).toFixed(2) + '%' }, { v: won(k.m.cost), color: R.no, bold: true },
+                      ] }))} />
+                  ) : <div style={{ fontSize: 12.5, color: R.sub, padding: 10 }}>비용만 나가고 전환 없는 키워드가 없습니다. 👍</div>}
+                </div>
+              </div>
+            </Section>
+          )}
+
+          {/* 매체별 (PC/모바일) */}
+          {deviceRows.length > 0 && (
+            <Section title="매체별 성과 (PC / 모바일)">
+              <MetricTable head={['매체', '노출', '클릭', 'CTR', 'CPC', '광고비', '전환', 'CVR', '매출', 'ROAS', '비중']}
+                rows={[...deviceRows.map(d => typeRowFull(d.device, d.m, false)),
+                  typeRowFull('전체', sumD(deviceRows.flatMap(d => [d.m].flat())), true)]} />
+            </Section>
+          )}
+
+          {/* 시간대별 */}
+          {hasHour && (
+            <Section title="시간대별 성과" sub={`전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)`}>
+              <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}><HourBars hours={hourAgg} /></div>
+            </Section>
+          )}
 
           {/* 낭비 의심 광고 */}
           {wasteAds.length > 0 && (
