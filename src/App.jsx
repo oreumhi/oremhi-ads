@@ -27,6 +27,7 @@ import Reviews from './pages/Reviews';
 import RankCheck from './pages/RankCheck';
 import Report from './pages/Report';
 import Proposals from './pages/Proposals';
+import Team from './pages/Team';
 import Settings from './pages/Settings';
 
 // ─── 로딩 화면 ───
@@ -317,6 +318,7 @@ export default function App() {
       {tab === 'rank' && <RankCheck currentUser={currentUser} />}
       {tab === 'report' && <Report currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'proposals' && <Proposals currentUser={currentUser} allowedBrands={allowedBrands} />}
+      {tab === 'team' && <Team currentUser={currentUser} />}
       {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
     </Layout>
   );
