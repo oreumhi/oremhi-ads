@@ -12,6 +12,7 @@ import {
   fetchReportsByDate, fetchMyReports, fetchReportsRange, upsertDailyReport, setCeoComment,
   fetchMeetings, addMeeting, updateMeeting, deleteMeeting,
   fetchOpenActions, fetchAllActions, fetchActionsByMeeting, addAction, toggleAction, deleteAction,
+  fetchEventsRange, addCalEvent, updateCalEvent, removeCalEvent, resolveEvent, uploadAttachment,
 } from '../team';
 import { fmtNum } from '../utils';
 
@@ -409,6 +410,277 @@ function Scoreboard({ users }) {
   );
 }
 
+
+// ══════════════ 캘린더 ══════════════
+const ETYPES = [
+  { k: 'annual', label: '연차', icon: '🏖', color: '#5b8def' },
+  { k: 'half',   label: '반차', icon: '⏰', color: '#45c8dc' },
+  { k: 'sick',   label: '병가', icon: '🏥', color: '#f07070' },
+  { k: 'out',    label: '외근·미팅', icon: '🚗', color: '#f5a445' },
+  { k: 'etc',    label: '기타', icon: '📌', color: '#9d7ff0' },
+  { k: 'promise', label: '약속(자동)', icon: '🔔', color: '#f0c746' },
+  { k: 'perf',   label: '성과경고(자동)', icon: '📉', color: '#ed6ea0' },
+];
+const etypeOf = (k) => ETYPES.find(t => t.k === k) || ETYPES[4];
+
+// 사진 자동 압축 (최대 1400px, JPEG) — 실패하면 원본 사용
+async function compressImage(file) {
+  try {
+    const img = await createImageBitmap(file);
+    const scale = Math.min(1, 1400 / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.82));
+    return blob || file;
+  } catch { return file; }
+}
+
+function covers(ev, dstr) {
+  const end = ev.end_date || ev.event_date;
+  return ev.event_date <= dstr && dstr <= end;
+}
+
+function TeamCalendar({ users, currentUser, isAdmin }) {
+  const [ym, setYm] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [events, setEvents] = useState([]);
+  const [yearEvents, setYearEvents] = useState([]);
+  const [meetings, setMeetings] = useState([]);
+  const [reports, setReports] = useState([]);
+  const [selDay, setSelDay] = useState(todayStr());
+  const [dayReports, setDayReports] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ etype: 'annual', owner_id: currentUser.id, end_date: '', memo: '' });
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [resolveText, setResolveText] = useState({});
+
+  // 달력 격자 (일요일 시작, 6주)
+  const grid = useMemo(() => {
+    const first = new Date(ym.y, ym.m, 1);
+    const start = new Date(first); start.setDate(1 - first.getDay());
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      return { dstr: ymd(d), inMonth: d.getMonth() === ym.m, dow: d.getDay() };
+    });
+  }, [ym]);
+  const gridFrom = grid[0].dstr, gridTo = grid[41].dstr;
+
+  const load = useCallback(async () => {
+    const [evs, ms, rs, yr] = await Promise.all([
+      fetchEventsRange(gridFrom, gridTo), fetchMeetings(100), fetchReportsRange(gridFrom, gridTo),
+      fetchEventsRange(`${ym.y}-01-01`, `${ym.y}-12-31`),
+    ]);
+    setEvents(evs); setMeetings(ms); setReports(rs); setYearEvents(yr);
+  }, [gridFrom, gridTo, ym.y]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { fetchReportsByDate(selDay).then(setDayReports); }, [selDay, events]);
+
+  const dayEvents = (dstr) => events.filter(e => covers(e, dstr));
+  const dayMeetings = (dstr) => meetings.filter(m => m.meeting_date === dstr);
+  const dayReportCnt = (dstr) => reports.filter(r => r.report_date === dstr).length;
+  const selEvents = dayEvents(selDay);
+  const selMeetings = dayMeetings(selDay);
+  const staffCnt = users.filter(u => u.role !== 'admin').length;
+
+  // 연간 사용 집계 (연차=일수, 반차=회수, 병가=일수)
+  const yearStats = useMemo(() => {
+    const per = {};
+    yearEvents.forEach(e => {
+      if (!['annual', 'half', 'sick'].includes(e.etype)) return;
+      const days = e.end_date ? (new Date(e.end_date) - new Date(e.event_date)) / 86400000 + 1 : 1;
+      const p = (per[e.owner_name || '?'] = per[e.owner_name || '?'] || { annual: 0, half: 0, sick: 0 });
+      if (e.etype === 'annual') p.annual += days;
+      if (e.etype === 'half') p.half += 1;
+      if (e.etype === 'sick') p.sick += days;
+    });
+    return per;
+  }, [yearEvents]);
+
+  const saveEvent = async () => {
+    const who = isAdmin ? (users.find(u => u.id === form.owner_id) || currentUser) : currentUser;
+    if (form.end_date && form.end_date < selDay) { alert('종료일이 시작일보다 빠릅니다.'); return; }
+    setUploading(true);
+    const atts = [];
+    for (const f of files) {
+      const blob = await compressImage(f);
+      const up = await uploadAttachment(blob, f.name);
+      if (up) atts.push(up); else alert(`사진 업로드 실패: ${f.name}`);
+    }
+    const t = etypeOf(form.etype);
+    const r = await addCalEvent({
+      event_date: selDay, end_date: form.end_date || null, etype: form.etype,
+      owner_id: who.id, owner_name: who.name,
+      title: `${who.name} ${t.label}`, memo: form.memo || '',
+      attachments: atts, created_by: currentUser.name,
+    });
+    setUploading(false);
+    if (r.ok) { setAdding(false); setForm({ etype: 'annual', owner_id: currentUser.id, end_date: '', memo: '' }); setFiles([]); load(); }
+    else alert('저장 실패: ' + r.msg);
+  };
+
+  const doRemove = async (ev) => {
+    const isAuto = ev.source !== 'manual';
+    if (!confirm(isAuto ? '이 자동 감지 항목을 숨길까요? (다시 등록되지 않습니다)' : '이 일정을 삭제할까요?')) return;
+    await removeCalEvent(ev); load();
+  };
+  const doResolve = async (ev) => {
+    const memo = (resolveText[ev.id] || '').trim();
+    if (!memo) { alert('원인·조치 내용을 입력해주세요.'); return; }
+    await resolveEvent(ev.id, memo, currentUser.name); load();
+  };
+
+  const cellH = 92;
+  const monthLabel = `${ym.y}년 ${ym.m + 1}월`;
+  const move = (n) => setYm(({ y, m }) => { const d = new Date(y, m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
+
+  return (
+    <div>
+      <Section title="팀 캘린더"
+        sub="날짜를 클릭하면 아래에 그날의 일정·보고·회의가 모입니다. 휴가/병가 등록과 영수증 사진 첨부도 날짜 클릭 후 하세요."
+        right={
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <button style={btn} onClick={() => move(-1)}>◀</button>
+            <b style={{ fontSize: 15, minWidth: 110, textAlign: 'center' }}>{monthLabel}</b>
+            <button style={btn} onClick={() => move(1)}>▶</button>
+            <button style={btn} onClick={() => { const d = new Date(); setYm({ y: d.getFullYear(), m: d.getMonth() }); setSelDay(todayStr()); }}>오늘</button>
+          </div>
+        }>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          {ETYPES.map(t => <span key={t.k} style={{ fontSize: 12, color: C.txd }}><span style={{ color: t.color }}>●</span> {t.icon} {t.label}</span>)}
+          <span style={{ fontSize: 12, color: C.txd }}>✍ 일일보고 · 📋 회의록</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+          {WDAY.map((w, i) => <div key={w} style={{ textAlign: 'center', fontSize: 12, fontWeight: 700, color: i === 0 ? C.no : i === 6 ? C.ac : C.txd, padding: '4px 0' }}>{w}</div>)}
+          {grid.map(({ dstr, inMonth, dow }) => {
+            const evs = dayEvents(dstr); const isToday = dstr === todayStr(); const isSel = dstr === selDay;
+            const rc = dayReportCnt(dstr); const ms = dayMeetings(dstr);
+            return (
+              <div key={dstr} onClick={() => setSelDay(dstr)}
+                style={{ minHeight: cellH, background: isSel ? 'rgba(91,141,239,0.14)' : C.sf2, borderRadius: 8, padding: 5, cursor: 'pointer',
+                  border: `1.5px solid ${isSel ? C.ac : isToday ? 'rgba(91,141,239,0.55)' : C.bd}`, opacity: inMonth ? 1 : 0.38 }}>
+                <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 600, color: dow === 0 ? C.no : dow === 6 ? C.ac : C.tx, marginBottom: 3 }}>
+                  {+dstr.slice(8)}{isToday && <span style={{ fontSize: 10, color: C.ac, marginLeft: 3 }}>오늘</span>}
+                  <span style={{ float: 'right', fontSize: 10 }}>
+                    {rc > 0 && <span style={{ color: C.ok }}>✍{rc}</span>}
+                    {ms.length > 0 && <span style={{ marginLeft: 3 }}>📋</span>}
+                  </span>
+                </div>
+                {evs.slice(0, 3).map(e => {
+                  const t = etypeOf(e.etype);
+                  return <div key={e.id} style={{ fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    background: t.color + '22', color: t.color, borderRadius: 4, padding: '1px 4px', marginBottom: 2 }}>
+                    {t.icon} {e.etype === 'perf' ? (e.brand || '성과') : e.etype === 'promise' ? (e.brand || '약속') : (e.owner_name || e.title)}
+                  </div>;
+                })}
+                {evs.length > 3 && <div style={{ fontSize: 10, color: C.txd }}>+{evs.length - 3}건 더</div>}
+              </div>
+            );
+          })}
+        </div>
+        {Object.keys(yearStats).length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: C.txd, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <b style={{ color: C.tx }}>{ym.y}년 사용:</b>
+            {Object.entries(yearStats).map(([name, s]) => (
+              <span key={name}>{name} — 연차 {s.annual}일 · 반차 {s.half}회 · 병가 {s.sick}일</span>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section title={`${kdw(selDay)} 상세`}
+        right={<button style={btnAc} onClick={() => setAdding(v => !v)}>{adding ? '닫기' : '+ 일정 등록'}</button>}>
+        {adding && (
+          <div style={{ background: C.sf2, borderRadius: 10, padding: 14, marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+              <select style={{ ...inp, width: 130 }} value={form.etype} onChange={e => setForm(f => ({ ...f, etype: e.target.value }))}>
+                {ETYPES.filter(t => !['promise', 'perf'].includes(t.k)).map(t => <option key={t.k} value={t.k}>{t.icon} {t.label}</option>)}
+              </select>
+              {isAdmin ? (
+                <select style={{ ...inp, width: 120 }} value={form.owner_id} onChange={e => setForm(f => ({ ...f, owner_id: e.target.value }))}>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              ) : <span style={{ ...inp, width: 'auto', display: 'inline-flex', alignItems: 'center' }}>{currentUser.name}</span>}
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: 13, color: C.txd }}>{kd(selDay)}부터</span>
+              <input type="date" style={{ ...inp, width: 150 }} value={form.end_date} min={selDay} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} />
+              <span style={{ display: 'inline-flex', alignItems: 'center', fontSize: 12, color: C.txm }}>← 하루면 비워두세요</span>
+            </div>
+            <textarea style={{ ...ta, minHeight: 44 }} placeholder="메모 (예: 병원 진료 / ○○ 미팅)" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
+            <div style={{ marginTop: 8 }}>
+              <div style={label}>📷 사진 첨부 (영수증·증빙 — 자동으로 용량을 줄여 저장합니다)</div>
+              <input type="file" accept="image/*" multiple style={{ fontSize: 13, color: C.txd }} onChange={e => setFiles(Array.from(e.target.files || []))} />
+              {files.length > 0 && <span style={{ fontSize: 12, color: C.ok, marginLeft: 8 }}>{files.length}장 선택됨</span>}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <button style={btnAc} disabled={uploading} onClick={saveEvent}>{uploading ? '사진 올리는 중…' : '등록하기'}</button>
+            </div>
+          </div>
+        )}
+
+        {selEvents.length === 0 && selMeetings.length === 0 && dayReports.length === 0 &&
+          <div style={{ color: C.txd, fontSize: 13 }}>이 날의 기록이 없습니다. '+ 일정 등록'으로 시작하세요.</div>}
+
+        {selEvents.map(ev => {
+          const t = etypeOf(ev.etype);
+          const canEdit = isAdmin || ev.owner_id === currentUser.id || ev.created_by === currentUser.name || ev.source !== 'manual';
+          return (
+            <div key={ev.id} style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <span style={{ color: t.color, fontWeight: 800, fontSize: 13.5 }}>{t.icon} {ev.title || t.label}</span>
+                  {ev.end_date && ev.end_date !== ev.event_date && <span style={{ fontSize: 12, color: C.txd, marginLeft: 6 }}>({kd(ev.event_date)}~{kd(ev.end_date)})</span>}
+                  {ev.severity === 'alert' && <span style={{ ...badge('rgba(240,112,112,0.15)', C.no), marginLeft: 6 }}>🚨 경고</span>}
+                  {ev.severity === 'warn' && <span style={{ ...badge('rgba(240,164,69,0.15)', C.warn), marginLeft: 6 }}>⚠ 주의</span>}
+                  {ev.status === 'resolved' && <span style={{ ...badge('rgba(61,217,160,0.15)', C.ok), marginLeft: 6 }}>조치완료</span>}
+                  {ev.memo && <div style={{ fontSize: 12.5, color: C.txd, marginTop: 4, whiteSpace: 'pre-wrap' }}>{ev.memo}</div>}
+                  {ev.status === 'resolved' && ev.resolve_memo && <div style={{ fontSize: 12.5, color: C.ok, marginTop: 4 }}>✅ 조치: {ev.resolve_memo} — {ev.resolved_by}</div>}
+                  {(ev.attachments || []).length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      {ev.attachments.map((a, i) => (
+                        <img key={i} src={a.url} alt={a.name} title={a.name} style={{ height: 64, borderRadius: 6, cursor: 'pointer', border: `1px solid ${C.bd}` }}
+                          onClick={() => window.open(a.url, '_blank')} />
+                      ))}
+                    </div>
+                  )}
+                  {ev.etype === 'perf' && ev.status === 'needs_check' && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <input style={{ ...inp, fontSize: 12.5 }} placeholder="원인·조치 입력 (예: 성수기 종료, 소재 3종 교체 예정)"
+                        value={resolveText[ev.id] || ''} onChange={e => setResolveText(s => ({ ...s, [ev.id]: e.target.value }))}
+                        onKeyDown={e => { if (e.key === 'Enter') doResolve(ev); }} />
+                      <button style={btnAc} onClick={() => doResolve(ev)}>조치 완료</button>
+                    </div>
+                  )}
+                </div>
+                {canEdit && <button style={{ ...btn, padding: '2px 8px', fontSize: 12 }} onClick={() => doRemove(ev)}>{ev.source === 'manual' ? '삭제' : '숨김'}</button>}
+              </div>
+            </div>
+          );
+        })}
+
+        {selMeetings.length > 0 && (
+          <div style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px' }}>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>📋 이 날의 회의록</div>
+            {selMeetings.map(m => <div key={m.id} style={{ fontSize: 12.5, color: C.txd, marginBottom: 3 }}><b style={{ color: C.tx }}>{m.title || '(제목 없음)'}</b>{m.notes ? ` — ${m.notes.slice(0, 80)}${m.notes.length > 80 ? '…' : ''}` : ''}</div>)}
+          </div>
+        )}
+        {dayReports.length > 0 && (
+          <div style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px' }}>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>✍ 이 날의 일일보고 ({dayReports.length}/{staffCnt})</div>
+            {dayReports.map(r => (
+              <div key={r.id} style={{ fontSize: 12.5, marginBottom: 6 }}>
+                <b style={{ color: C.cyan }}>{r.staff_name}</b>
+                {r.done && <span style={{ color: C.tx }}> — {r.done.slice(0, 100)}{r.done.length > 100 ? '…' : ''}</span>}
+                {r.blocker && <span style={{ color: C.warn }}> ⚠ {r.blocker.slice(0, 50)}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
 // ══════════════ 메인 ══════════════
 export default function Team({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
@@ -418,6 +690,7 @@ export default function Team({ currentUser }) {
 
   const tabs = [
     ['daily', isAdmin ? '📝 일일보고 (모아보기)' : '📝 일일보고'],
+    ['calendar', '📅 캘린더'],
     ['meetings', '📋 회의록 · 액션'],
     ['score', '🏅 스코어보드'],
   ];
@@ -434,6 +707,7 @@ export default function Team({ currentUser }) {
       {sub === 'daily' && (isAdmin
         ? <div><DailyAdmin users={users} currentUser={currentUser} /><MyDaily currentUser={currentUser} /></div>
         : <MyDaily currentUser={currentUser} />)}
+      {sub === 'calendar' && <TeamCalendar users={users} currentUser={currentUser} isAdmin={isAdmin} />}
       {sub === 'meetings' && <MeetingsView users={users} currentUser={currentUser} isAdmin={isAdmin} />}
       {sub === 'score' && <Scoreboard users={users} />}
     </div>
