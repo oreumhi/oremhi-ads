@@ -323,4 +323,5 @@ export default function App() {
 }
 
 // ─── 공통 스타일 ───
-const inp = { background:'#1a1e2c', border:'1px solid #282d40', borderRadius:8, padding:'12px 14px', color:'
+const inp = { background:'#1a1e2c', border:'1px solid #282d40', borderRadius:8, padding:'12px 14px', color:'#e4e7ed', fontSize:14, outline:'none', width:'100%', boxSizing:'border-box' };
+const btnPrimary = { background:'#5b8def', color:'#fff', border:'none', borderRadius:8, padding:'12px 0', cursor:'pointer', fontWeight:600, fontSize:15, width:'100%', marginTop:4 };
