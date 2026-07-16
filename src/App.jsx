@@ -176,7 +176,10 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [shareCode, setShareCode] = useState(null);
   const [shareBrand, setShareBrand] = useState(null);
-  const [tab, setTab] = useState('dashboard');
+  const [tab, setTab] = useState(() => sessionStorage.getItem('oha_tab') || 'dashboard');
+
+  // 현재 탭을 저장 → F5 새로고침해도 같은 화면 유지
+  useEffect(() => { try { sessionStorage.setItem('oha_tab', tab); } catch { /* ignore */ } }, [tab]);
 
   const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange } = useStore(currentUser);
 
@@ -234,6 +237,7 @@ export default function App() {
   // ─── 로그아웃 ───
   const handleLogout = () => {
     sessionStorage.removeItem('oha_user');
+    sessionStorage.removeItem('oha_tab');
     setCurrentUser(null);
     setMode('login');
     setTab('dashboard');
@@ -319,5 +323,4 @@ export default function App() {
 }
 
 // ─── 공통 스타일 ───
-const inp = { background:'#1a1e2c', border:'1px solid #282d40', borderRadius:8, padding:'12px 14px', color:'#e4e7ed', fontSize:14, outline:'none', width:'100%', boxSizing:'border-box' };
-const btnPrimary = { background:'#5b8def', color:'#fff', border:'none', borderRadius:8, padding:'12px 0', cursor:'pointer', fontWeight:600, fontSize:15, width:'100%', marginTop:4 };
+const inp = { background:'#1a1e2c', border:'1px solid #282d40', borderRadius:8, padding:'12px 14px', color:'
