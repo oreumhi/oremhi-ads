@@ -121,6 +121,45 @@ function GBars({ items }) {
   );
 }
 
+function LineChart({ items }) {
+  if (!items.length) return null;
+  const W = 720, H = 210, PL = 12, PR = 12, PT = 14, PB = 30;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const maxS = Math.max(1, ...items.map(i => i.spend));
+  const maxR = Math.max(1, ...items.map(i => i.revenue));
+  const n = items.length;
+  const x = (i) => n === 1 ? PL + iw / 2 : PL + (i / (n - 1)) * iw;
+  const ys = (v) => PT + ih - (v / maxS) * ih;
+  const yr = (v) => PT + ih - (v / maxR) * ih;
+  const sLine = items.map((it, i) => `${x(i)},${ys(it.spend)}`).join(' ');
+  const rLine = items.map((it, i) => `${x(i)},${yr(it.revenue)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      <line x1={PL} y1={PT + ih} x2={W - PR} y2={PT + ih} stroke={R.line} />
+      <polyline points={sLine} fill="none" stroke={R.warn} strokeWidth="2.5" />
+      <polyline points={rLine} fill="none" stroke={R.pink} strokeWidth="2.5" />
+      {items.map((it, i) => (
+        <g key={i}>
+          <circle cx={x(i)} cy={ys(it.spend)} r="3.2" fill={R.warn} />
+          <circle cx={x(i)} cy={yr(it.revenue)} r="3.2" fill={R.pink} />
+          {(n <= 16 || i % 3 === 0) && <text x={x(i)} y={H - 9} fontSize="10" fill={R.sub} textAnchor="middle">{String(it.label).length > 6 ? String(it.label).slice(0, 6) : it.label}</text>}
+        </g>
+      ))}
+    </svg>
+  );
+}
+function ChartBlock({ items }) {
+  if (!items.length) return null;
+  return (
+    <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}>
+      <div style={{ fontSize: 11, color: R.sub, marginBottom: 4 }}>
+        <span style={{ color: R.warn, fontWeight: 800 }}>—</span> 광고비 &nbsp;&nbsp; <span style={{ color: R.pink, fontWeight: 800 }}>—</span> 매출액 &nbsp;<span style={{ color: '#9aa3b2' }}>(각 지표별 축 기준 · 추이 비교)</span>
+      </div>
+      <LineChart items={items} />
+    </div>
+  );
+}
+
 function Delta({ g, invert }) {
   const up = g >= 0, good = invert ? !up : up;
   if (Math.abs(g) < 0.05) return <span style={{ fontSize: 12, color: R.sub }}>― 변동없음</span>;
@@ -411,8 +450,8 @@ export default function Report({ currentUser, allowedBrands }) {
           </Section>
 
           {/* 일자별 추이 */}
-          <Section title="일자별 추이" sub="■ 광고비(막대)  —  매출(선)">
-            <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}><TrendChart daily={daily} /></div>
+          <Section title="일자별 추이 (광고비 vs 매출)">
+            <ChartBlock items={daily.map(d => ({ label: d.date.slice(5), spend: d.cost, revenue: d.revenue }))} />
           </Section>
 
           {/* 일별 성과 */}
@@ -424,7 +463,7 @@ export default function Report({ currentUser, allowedBrands }) {
           {/* 요일별 성과 */}
           {byWeekday.length >= 1 && (
             <Section title="요일별 성과">
-              <div style={{ marginBottom: 12 }}><GBars items={byWeekday.map(w => ({ label: w.label, spend: w.m.cost, revenue: w.m.revenue, roas: roasOf(w.m) }))} /></div>
+              <div style={{ marginBottom: 12 }}><ChartBlock items={byWeekday.map(w => ({ label: w.label, spend: w.m.cost, revenue: w.m.revenue, roas: roasOf(w.m) }))} /></div>
               <MetricTable head={['요일', ...STD_HEAD]}
                 rows={[...byWeekday.map(w => ({ label: w.label, cells: stdCells(w.m) })), { label: '전체', hl: true, bold: true, cells: stdCells(cur) }]} />
             </Section>
@@ -432,7 +471,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 광고유형별 성과 */}
           <Section title="광고유형별 성과">
-            <div style={{ marginBottom: 12 }}><GBars items={byType.map(t => ({ label: t.type, spend: t.m.cost, revenue: t.m.revenue, roas: roasOf(t.m) }))} /></div>
+            <div style={{ marginBottom: 12 }}><ChartBlock items={byType.map(t => ({ label: t.type, spend: t.m.cost, revenue: t.m.revenue, roas: roasOf(t.m) }))} /></div>
             <MetricTable head={['광고유형', ...STD_HEAD, '비중']} rows={[...byType.map(({ type, m }) => ({ label: type, cells: [...stdCells(m), { v: (cur.cost > 0 ? m.cost / cur.cost * 100 : 0).toFixed(0) + '%', color: R.sub }] })), { label: '전체', hl: true, bold: true, cells: [...stdCells(cur), { v: '100%', color: R.sub }] }]} />
           </Section>
 
@@ -466,7 +505,7 @@ export default function Report({ currentUser, allowedBrands }) {
             <Section title="매체별 성과 (PC / 모바일)">
               {deviceRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 매체별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <div>
-              <div style={{ marginBottom: 12 }}><GBars items={deviceRows.map(d => ({ label: d.device, spend: d.m.cost, revenue: d.m.revenue, roas: roasOf(d.m) }))} /></div>
+              <div style={{ marginBottom: 12 }}><ChartBlock items={deviceRows.map(d => ({ label: d.device, spend: d.m.cost, revenue: d.m.revenue, roas: roasOf(d.m) }))} /></div>
               <MetricTable head={['매체', ...STD_HEAD, '비중']}
                 rows={[...deviceRows.map(d => ({ label: d.device, cells: [...stdCells(d.m), { v: (devTotalCost > 0 ? d.m.cost / devTotalCost * 100 : 0).toFixed(0) + '%', color: R.sub }] })), { label: '전체', hl: true, bold: true, cells: [...stdCells(sumD(deviceRows.map(d => d.m))), { v: '100%', color: R.sub }] }]} />
               </div>
@@ -478,7 +517,7 @@ export default function Report({ currentUser, allowedBrands }) {
           {channel === 'search' && (
             <Section title="시간대별 성과" sub={hasHour ? `전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)` : ''}>
               {!hasHour ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 시간대별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
-              <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}><HourBars hours={hourAgg} /></div>
+              <ChartBlock items={hourAgg.map(h => ({ label: h.hour_num + '시', spend: h.cost, revenue: h.revenue }))} />
               )}
             </Section>
           )}
