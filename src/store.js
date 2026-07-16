@@ -500,3 +500,26 @@ export async function fetchAdDataForReport(rangeDays, ownerId) {
 export async function fetchMappingsAll() {
   return await fetchAll('mappings');
 }
+
+// ─── 리포트 확장: 키워드/매체/시간대 데이터 (기간 조회) ───
+async function fetchDimTable(table, ownerId, fromDate, toDate) {
+  if (!sb) return [];
+  const all = [];
+  const pageSize = 1000;
+  let from = 0;
+  while (true) {
+    let q = sb.from(table).select('*').gte('date', fromDate).lte('date', toDate)
+      .order('date', { ascending: true }).range(from, from + pageSize - 1);
+    if (ownerId) q = q.eq('owner_id', ownerId);
+    const { data, error } = await q;
+    if (error) { console.error(`[${table}] 조회:`, error.message); break; }
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+export const fetchReportKeyword = (ownerId, f, t) => fetchDimTable('report_keyword', ownerId, f, t);
+export const fetchReportMedia = (ownerId, f, t) => fetchDimTable('report_media', ownerId, f, t);
+export const fetchReportHour = (ownerId, f, t) => fetchDimTable('report_hour', ownerId, f, t);
