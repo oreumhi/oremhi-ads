@@ -5,7 +5,7 @@
 // ============================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchAdDataForReport, fetchMappingsAll, fetchReportKeyword, fetchReportMedia, fetchReportHour } from '../store';
+import { fetchAdDataForReport, fetchMappingsAll, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
 const R = {
@@ -222,6 +222,7 @@ export default function Report({ currentUser, allowedBrands }) {
   const [kwData, setKwData] = useState([]);
   const [mediaData, setMediaData] = useState([]);
   const [hourData, setHourData] = useState([]);
+  const [demoData, setDemoData] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -246,8 +247,8 @@ export default function Report({ currentUser, allowedBrands }) {
     let alive = true;
     const oid = isAdmin ? null : currentUser.id;
     Promise.all([
-      fetchReportKeyword(oid, thisFrom, thisTo), fetchReportMedia(oid, thisFrom, thisTo), fetchReportHour(oid, thisFrom, thisTo),
-    ]).then(([k, m, h]) => { if (alive) { setKwData(k); setMediaData(m); setHourData(h); } });
+      fetchReportKeyword(oid, thisFrom, thisTo), fetchReportMedia(oid, thisFrom, thisTo), fetchReportHour(oid, thisFrom, thisTo), fetchReportDemo(oid, thisFrom, thisTo),
+    ]).then(([k, m, h, dm]) => { if (alive) { setKwData(k); setMediaData(m); setHourData(h); setDemoData(dm); } });
     return () => { alive = false; };
   }, [thisFrom, thisTo, isAdmin, currentUser]);
 
@@ -328,6 +329,31 @@ export default function Report({ currentUser, allowedBrands }) {
   const hasHour = useMemo(() => hourAgg.some(h => h.impressions > 0), [hourAgg]);
   const topHours = useMemo(() => hourAgg.slice().filter(h => h.cost > 0).sort((a, b) => b.conversions - a.conversions || b.cost - a.cost).slice(0, 3), [hourAgg]);
 
+  // ─── 성별/연령대/지역 집계 (선택 브랜드) ───
+  const demoAgg = useCallback((dim, sortMode) => {
+    const g = {};
+    demoData.forEach(r => {
+      if (r.dim !== dim) return;
+      if (acctBase(r.account) !== brand) return;
+      const k = (r.label || '-').trim(); if (!k || k === '-') return;
+      (g[k] = g[k] || { label: k, rows: [] }).rows.push(r);
+    });
+    let arr = Object.values(g).map(x => ({ label: x.label, m: sumD(x.rows) }));
+    if (sortMode === 'age') {
+      const num = (val) => { const mm = String(val).match(/\d+/); return mm ? +mm[0] : 999; };
+      arr.sort((a, b) => num(a.label) - num(b.label));
+    } else if (sortMode === 'gender') {
+      const ord = { '남성': 0, '여성': 1 };
+      arr.sort((a, b) => (ord[a.label] ?? 2) - (ord[b.label] ?? 2));
+    } else {
+      arr.sort((a, b) => b.m.cost - a.m.cost);
+    }
+    return arr;
+  }, [demoData, brand]);
+  const genderRows = useMemo(() => demoAgg('gender', 'gender'), [demoAgg]);
+  const ageRows = useMemo(() => demoAgg('age', 'age'), [demoAgg]);
+  const regionRows = useMemo(() => demoAgg('region', 'region').slice(0, 12), [demoAgg]);
+
   const summary = useMemo(() => {
     if (!thisRows.length) return '';
     const gRoas = growth(roasOf(cur), roasOf(prev)), gRev = growth(cur.revenue, prev.revenue), gCost = growth(cur.cost, prev.cost), gConv = growth(cur.conversions, prev.conversions);
@@ -358,6 +384,13 @@ export default function Report({ currentUser, allowedBrands }) {
   const btnOn = { ...btn, background: '#3a6ff0', color: '#fff', border: 'none', fontWeight: 700 };
 
   const devTotalCost = deviceRows.reduce((s, d) => s + d.m.cost, 0) || 1;
+  const demoTableRows = (rows) => {
+    const tot = rows.reduce((s, d) => s + d.m.cost, 0) || 1;
+    return [
+      ...rows.map(d => ({ label: d.label, cells: [...stdCells(d.m), { v: (d.m.cost / tot * 100).toFixed(0) + '%', color: R.sub }] })),
+      { label: '전체', hl: true, bold: true, cells: [...stdCells(sumD(rows.map(d => d.m))), { v: '100%', color: R.sub }] },
+    ];
+  };
   const typeRowFull = (label, m, hl) => ({ label, hl, bold: hl, cells: [
     { v: num(m.impressions) }, { v: num(m.clicks) }, { v: ctrOf(m).toFixed(2) + '%' }, { v: won(cpcOf(m)), color: R.sub },
     { v: won(m.cost), color: R.warn, bold: true }, { v: num(m.conversions), color: R.ok, bold: true }, { v: cvrOf(m).toFixed(1) + '%' },
@@ -518,6 +551,42 @@ export default function Report({ currentUser, allowedBrands }) {
             <Section title="시간대별 성과" sub={hasHour ? `전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)` : ''}>
               {!hasHour ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 시간대별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <ChartBlock items={hourAgg.map(h => ({ label: h.hour_num + '시', spend: h.cost, revenue: h.revenue }))} />
+              )}
+            </Section>
+          )}
+
+          {/* 성별 (검색광고만) */}
+          {channel === 'search' && (
+            <Section title="성별 성과" sub="어떤 성별에서 전환이 잘 나오는지 — 타겟 조정·소재 방향의 근거가 됩니다.">
+              {genderRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 성별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+              <div>
+                <div style={{ marginBottom: 12 }}><ChartBlock items={genderRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
+                <MetricTable head={['성별', ...STD_HEAD, '비중']} rows={demoTableRows(genderRows)} />
+              </div>
+              )}
+            </Section>
+          )}
+
+          {/* 연령대 (검색광고만) */}
+          {channel === 'search' && (
+            <Section title="연령대 성과" sub="연령대별 반응 — 예산을 어느 연령에 집중할지 판단하는 기준입니다.">
+              {ageRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 연령대 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+              <div>
+                <div style={{ marginBottom: 12 }}><ChartBlock items={ageRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
+                <MetricTable head={['연령대', ...STD_HEAD, '비중']} rows={demoTableRows(ageRows)} />
+              </div>
+              )}
+            </Section>
+          )}
+
+          {/* 지역 (검색광고만) */}
+          {channel === 'search' && (
+            <Section title="지역별 성과 (상위 12)" sub="지역별 성과 — 지역 타겟팅·매장 연계 프로모션에 참고하세요.">
+              {regionRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 지역 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+              <div>
+                <div style={{ marginBottom: 12 }}><ChartBlock items={regionRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
+                <MetricTable head={['지역', ...STD_HEAD, '비중']} rows={demoTableRows(regionRows)} />
+              </div>
               )}
             </Section>
           )}
