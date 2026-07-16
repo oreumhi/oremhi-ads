@@ -24,6 +24,7 @@ export const TABS = [
   { id: 'rank',      label: '순위 체크', icon: '🏆' },
   { id: 'report',    label: '광고주 리포트', icon: '📄' },
   { id: 'proposals', label: '제안 도우미', icon: '💡' },
+  { id: 'team',      label: '팀 업무', icon: '🤝' },
   { id: 'settings',  label: '설정', icon: '⚙️' },
 ];
 
