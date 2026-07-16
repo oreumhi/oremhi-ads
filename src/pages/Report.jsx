@@ -231,14 +231,14 @@ export default function Report({ currentUser, allowedBrands }) {
   // ─── 키워드/매체/시간대 집계 (선택 브랜드) ───
   const kwAgg = useMemo(() => {
     const g = {};
-    kwData.forEach(r => { if (campByBrand[r.campaign] !== brand) return; const k = r.keyword || '-'; (g[k] = g[k] || { keyword: k, rows: [] }).rows.push(r); });
+    kwData.forEach(r => { if (acctBase(r.account) !== brand) return; const k = r.keyword || '-'; (g[k] = g[k] || { keyword: k, rows: [] }).rows.push(r); });
     return Object.values(g).map(x => ({ keyword: x.keyword, m: sumD(x.rows) })).filter(x => x.keyword && x.keyword !== '-');
   }, [kwData, campByBrand, brand]);
   const topKw = useMemo(() => kwAgg.slice().sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 10), [kwAgg]);
   const wasteKw = useMemo(() => kwAgg.filter(x => x.m.cost >= 3000 && x.m.conversions === 0).sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
   const deviceRows = useMemo(() => {
     const g = {};
-    mediaData.forEach(r => { if (groupByBrand[r.adgroup] !== brand) return; (g[r.device] = g[r.device] || []).push(r); });
+    mediaData.forEach(r => { if (acctBase(r.account) !== brand) return; (g[r.device] = g[r.device] || []).push(r); });
     return ['PC', '모바일'].filter(d => g[d]).map(d => ({ device: d, m: sumD(g[d]) }));
   }, [mediaData, groupByBrand, brand]);
   const hourAgg = useMemo(() => {
