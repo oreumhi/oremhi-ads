@@ -151,3 +151,82 @@ export async function deleteAction(id) {
   const { error } = await sb.from('action_items').delete().eq('id', id);
   return !error;
 }
+
+// ─── 캘린더 ───
+
+// 기간 내 일정 (기간 일정은 걸쳐 있으면 포함, 숨김 처리된 자동항목 제외)
+export async function fetchEventsRange(fromDate, toDate) {
+  if (!sb) return [];
+  const { data, error } = await sb.from('calendar_events')
+    .select('*').lte('event_date', toDate)
+    .or(`end_date.gte.${fromDate},event_date.gte.${fromDate}`)
+    .neq('status', 'dismissed')
+    .order('event_date').limit(1000);
+  if (error) { console.error('[calendar] 조회:', error.message); return []; }
+  return data || [];
+}
+
+export async function addCalEvent(ev) {
+  if (!sb || !ev.event_date || !ev.etype) return { ok: false, msg: '날짜/유형 누락' };
+  const row = { id: uid(), source: 'manual', status: 'ok', attachments: [], ...ev };
+  const { data, error } = await sb.from('calendar_events').insert(row).select().single();
+  if (error) return { ok: false, msg: error.message };
+  return { ok: true, event: data };
+}
+
+export async function updateCalEvent(id, updates) {
+  if (!sb || !id) return false;
+  const { error } = await sb.from('calendar_events')
+    .update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id);
+  return !error;
+}
+
+// 수동 일정: 완전 삭제 / 자동 일정: 숨김(재등록 방지)
+export async function removeCalEvent(ev) {
+  if (!sb || !ev?.id) return false;
+  if (ev.source === 'manual') {
+    const { error } = await sb.from('calendar_events').delete().eq('id', ev.id);
+    return !error;
+  }
+  return updateCalEvent(ev.id, { status: 'dismissed' });
+}
+
+// 성과 경고 조치 완료
+export async function resolveEvent(id, memo, byName) {
+  if (!sb || !id) return false;
+  return updateCalEvent(id, { status: 'resolved', resolve_memo: memo || '', resolved_by: byName || '', resolved_at: new Date().toISOString() });
+}
+
+// 미조치 성과 경고 (아침 알림용)
+export async function fetchOpenPerfAlerts() {
+  if (!sb) return [];
+  const { data, error } = await sb.from('calendar_events')
+    .select('*').eq('etype', 'perf').eq('status', 'needs_check')
+    .order('event_date', { ascending: false }).limit(50);
+  if (error) return [];
+  return data || [];
+}
+
+// 오늘 약속 (아침 알림용)
+export async function fetchTodayPromises(dateStr) {
+  if (!sb) return [];
+  const { data, error } = await sb.from('calendar_events')
+    .select('*').eq('etype', 'promise').eq('event_date', dateStr).neq('status', 'dismissed')
+    .limit(50);
+  if (error) return [];
+  return data || [];
+}
+
+// 사진 업로드 → 공개 URL 반환
+export async function uploadAttachment(blob, filename) {
+  if (!sb) return null;
+  const ext = (filename || 'photo.jpg').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const ym = new Date().toISOString().slice(0, 7);
+  const path = `${ym}/${uid()}.${ext === 'png' ? 'png' : 'jpg'}`;
+  const { error } = await sb.storage.from('attachments').upload(path, blob, {
+    contentType: blob.type || 'image/jpeg', upsert: true,
+  });
+  if (error) { console.error('[storage] 업로드:', error.message); return null; }
+  const { data } = sb.storage.from('attachments').getPublicUrl(path);
+  return { url: data.publicUrl, path, name: filename || 'photo.jpg' };
+}
