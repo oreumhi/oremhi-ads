@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
 import { fetchAdDataForReport, fetchMappingsAll } from '../store';
+import { fetchTodayPromises, fetchOpenPerfAlerts } from '../team';
 import { fmtWon, fmtNum } from '../utils';
 
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -25,16 +26,20 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
   const isAdmin = currentUser?.role === 'admin';
   const [adData, setAdData] = useState([]);
   const [mappings, setMappings] = useState([]);
+  const [promises, setPromises] = useState([]);
+  const [perfAlerts, setPerfAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [ad, mp] = await Promise.all([
+    const [ad, mp, pr, pf] = await Promise.all([
       fetchAdDataForReport(16, isAdmin ? null : currentUser.id),
       fetchMappingsAll(),
+      fetchTodayPromises(ymd(new Date())),
+      fetchOpenPerfAlerts(),
     ]);
-    setAdData(ad); setMappings(mp); setLoading(false);
+    setAdData(ad); setMappings(mp); setPromises(pr); setPerfAlerts(pf); setLoading(false);
   }, [isAdmin, currentUser]);
   useEffect(() => { load(); }, [load]);
 
@@ -96,14 +101,37 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 15, fontWeight: 800 }}>🔔 오늘 챙길 것</span>
           {loading ? <span style={{ fontSize: 12, color: C.txd }}>확인 중…</span> :
-            alerts.length === 0 ? <span style={{ fontSize: 12, color: C.ok }}>이상 없음</span> :
-              <span style={{ fontSize: 12, fontWeight: 700, color: high ? C.no : C.warn }}>{alerts.length}건{high ? ` (위험 ${high})` : ''}</span>}
+            (alerts.length + promises.length + perfAlerts.length) === 0 ? <span style={{ fontSize: 12, color: C.ok }}>이상 없음</span> :
+              <span style={{ fontSize: 12, fontWeight: 700, color: (high || perfAlerts.some(p => p.severity === 'alert')) ? C.no : C.warn }}>
+                {alerts.length + perfAlerts.length}건{promises.length ? ` · 오늘 약속 ${promises.length}건` : ''}</span>}
         </div>
         <span style={{ fontSize: 12, color: C.txd }}>{open ? '▲' : '▼'}</span>
       </div>
 
       {open && !loading && (
         <div style={{ marginTop: 12 }}>
+          {promises.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.yel, marginBottom: 6 }}>📞 오늘 연락드리기로 한 약속 ({promises.length}건)</div>
+              {promises.map(p => (
+                <div key={p.id} style={{ background: 'rgba(240,199,70,0.08)', border: '1px solid rgba(240,199,70,0.35)', borderRadius: 10, padding: '8px 12px', marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>[{p.brand}] {p.title}</div>
+                  <div style={{ fontSize: 12, color: C.txd, marginTop: 2, whiteSpace: 'pre-wrap' }}>{(p.memo || '').split('\n').slice(-1)[0]}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {perfAlerts.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.pink, marginBottom: 6 }}>📉 성과 경고 — 조치 필요 ({perfAlerts.length}건, 팀 업무→캘린더에서 조치 입력)</div>
+              {perfAlerts.map(p => (
+                <div key={p.id} style={{ background: 'rgba(237,110,160,0.08)', border: '1px solid rgba(237,110,160,0.35)', borderRadius: 10, padding: '8px 12px', marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{p.severity === 'alert' ? '🚨' : '⚠'} {p.title}</div>
+                  <div style={{ fontSize: 12, color: C.txd, marginTop: 2 }}>{p.memo}</div>
+                </div>
+              ))}
+            </div>
+          )}
           {alerts.length === 0 ? (
             <div style={{ fontSize: 13, color: C.txd }}>최근 7일 기준 특별히 챙길 이상 신호가 없습니다. 좋은 흐름입니다. 👍</div>
           ) : (
