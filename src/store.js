@@ -523,3 +523,4 @@ async function fetchDimTable(table, ownerId, fromDate, toDate) {
 export const fetchReportKeyword = (ownerId, f, t) => fetchDimTable('report_keyword', ownerId, f, t);
 export const fetchReportMedia = (ownerId, f, t) => fetchDimTable('report_media', ownerId, f, t);
 export const fetchReportHour = (ownerId, f, t) => fetchDimTable('report_hour', ownerId, f, t);
+export const fetchReportDemo = (ownerId, f, t) => fetchDimTable('report_demo', ownerId, f, t);
