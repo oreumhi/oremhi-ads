@@ -37,7 +37,7 @@ const WD = ['일', '월', '화', '수', '목', '금', '토'];
 const PERIODS = { daily: { n: 1, label: '일간' }, weekly: { n: 7, label: '주간' }, monthly: { n: 30, label: '월간' } };
 
 // 전 지표 정의 (비교표·유형표 공용)
-const roasStr = (v) => (v / 100).toFixed(2) + '배';
+const roasStr = (v) => fmtNum(Math.round(v || 0)) + '%';
 const STD_HEAD = ['노출수', '클릭수', '클릭률', '총비용', '전환수', '전환율', '구매완료비용', '전환매출액', 'ROAS'];
 const stdCells = (m) => [
   { v: fmtNum(Math.round(m.impressions || 0)) }, { v: fmtNum(Math.round(m.clicks || 0)) }, { v: ctrOf(m).toFixed(2) + '%' },
@@ -94,6 +94,33 @@ function HourBars({ hours }) {
   );
 }
 
+function GBars({ items }) {
+  if (!items.length) return null;
+  const max = Math.max(1, ...items.flatMap(i => [i.spend, i.revenue]));
+  const row = (label, val, color) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+      <div style={{ width: 36, fontSize: 10, color, flexShrink: 0 }}>{label}</div>
+      <div style={{ flex: 1, background: R.soft, borderRadius: 4, height: 13 }}>
+        <div style={{ width: Math.max(1, val / max * 100) + '%', background: color, height: '100%', borderRadius: 4 }} />
+      </div>
+      <div style={{ width: 92, fontSize: 11, textAlign: 'right', flexShrink: 0, color: R.ink }}>{won(val)}</div>
+    </div>
+  );
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '10px 20px' }}>
+      {items.map((it, i) => (
+        <div key={i} style={{ border: `1px solid ${R.line}`, borderRadius: 8, padding: '8px 10px' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>{it.label}
+            <span style={{ fontSize: 11, fontWeight: 400, color: it.roas >= 300 ? R.ok : it.roas < 100 ? R.no : R.sub, marginLeft: 6 }}>ROAS {fmtNum(Math.round(it.roas || 0))}%</span>
+          </div>
+          {row('광고비', it.spend, R.warn)}
+          {row('매출', it.revenue, R.pink)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Delta({ g, invert }) {
   const up = g >= 0, good = invert ? !up : up;
   if (Math.abs(g) < 0.05) return <span style={{ fontSize: 12, color: R.sub }}>― 변동없음</span>;
@@ -109,7 +136,7 @@ function Kpi({ label, value, cur, prev, invert }) {
   );
 }
 
-const tdBase = { padding: '9px 10px', borderBottom: `1px solid ${R.line}`, fontSize: 12.5 };
+const tdBase = { padding: '9px 10px', borderBottom: `1px solid ${R.line}`, fontSize: 12.5, whiteSpace: 'nowrap' };
 
 function MetricTable({ head, rows }) {
   // rows: [{ label, cells:[{v, color, bold}] , head }]
@@ -397,6 +424,7 @@ export default function Report({ currentUser, allowedBrands }) {
           {/* 요일별 성과 */}
           {byWeekday.length >= 1 && (
             <Section title="요일별 성과">
+              <div style={{ marginBottom: 12 }}><GBars items={byWeekday.map(w => ({ label: w.label, spend: w.m.cost, revenue: w.m.revenue, roas: roasOf(w.m) }))} /></div>
               <MetricTable head={['요일', ...STD_HEAD]}
                 rows={[...byWeekday.map(w => ({ label: w.label, cells: stdCells(w.m) })), { label: '전체', hl: true, bold: true, cells: stdCells(cur) }]} />
             </Section>
@@ -404,6 +432,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 광고유형별 성과 */}
           <Section title="광고유형별 성과">
+            <div style={{ marginBottom: 12 }}><GBars items={byType.map(t => ({ label: t.type, spend: t.m.cost, revenue: t.m.revenue, roas: roasOf(t.m) }))} /></div>
             <MetricTable head={['광고유형', ...STD_HEAD, '비중']} rows={[...byType.map(({ type, m }) => ({ label: type, cells: [...stdCells(m), { v: (cur.cost > 0 ? m.cost / cur.cost * 100 : 0).toFixed(0) + '%', color: R.sub }] })), { label: '전체', hl: true, bold: true, cells: [...stdCells(cur), { v: '100%', color: R.sub }] }]} />
           </Section>
 
@@ -436,8 +465,11 @@ export default function Report({ currentUser, allowedBrands }) {
           {channel === 'search' && (
             <Section title="매체별 성과 (PC / 모바일)">
               {deviceRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 매체별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+              <div>
+              <div style={{ marginBottom: 12 }}><GBars items={deviceRows.map(d => ({ label: d.device, spend: d.m.cost, revenue: d.m.revenue, roas: roasOf(d.m) }))} /></div>
               <MetricTable head={['매체', ...STD_HEAD, '비중']}
                 rows={[...deviceRows.map(d => ({ label: d.device, cells: [...stdCells(d.m), { v: (devTotalCost > 0 ? d.m.cost / devTotalCost * 100 : 0).toFixed(0) + '%', color: R.sub }] })), { label: '전체', hl: true, bold: true, cells: [...stdCells(sumD(deviceRows.map(d => d.m))), { v: '100%', color: R.sub }] }]} />
+              </div>
               )}
             </Section>
           )}
