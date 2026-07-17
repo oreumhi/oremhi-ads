@@ -19,25 +19,34 @@ export const sb = hasSB ? createClient(url, key) : null;
 
 // ─── 기본 CRUD ───
 
+// 병렬 페이지 로딩 (Supabase Max rows=5000과 일치)
+const PAGE_SIZE = 5000;
+async function fetchPagedParallel(makeQuery, wave = 6) {
+  const all = [];
+  let page = 0;
+  for (;;) {
+    const results = await Promise.all(
+      Array.from({ length: wave }, (_, i) => makeQuery(page + i, PAGE_SIZE))
+    );
+    page += wave;
+    let done = false;
+    for (const { data, error } of results) {
+      if (error) { console.error('[병렬조회] 오류:', error.message); done = true; break; }
+      if (!data || data.length === 0) { done = true; break; }
+      all.push(...data);
+      if (data.length < PAGE_SIZE) { done = true; break; }
+    }
+    if (done) break;
+  }
+  return all;
+}
+
 async function fetchAll(table) {
   if (sb) {
-    // Supabase는 한번에 1000행만 반환 → 페이지네이션으로 전체 조회
-    const allData = [];
-    const pageSize = 1000;
-    let from = 0;
-    while (true) {
-      const { data, error } = await sb
-        .from(table)
-        .select('*')
-        .order('created_at', { ascending: true })
-        .range(from, from + pageSize - 1);
-      if (error) { console.error(`[${table}] 조회:`, error.message); break; }
-      if (!data || data.length === 0) break;
-      allData.push(...data);
-      if (data.length < pageSize) break; // 마지막 페이지
-      from += pageSize;
-    }
-    return allData;
+    return await fetchPagedParallel((p, size) => sb.from(table)
+      .select('*')
+      .order('created_at', { ascending: true })
+      .range(p * size, p * size + size - 1));
   }
   try { return JSON.parse(localStorage.getItem(`oha_${table}`) || '[]'); }
   catch { return []; }
@@ -46,23 +55,11 @@ async function fetchAll(table) {
 // 소유자별 조회 (직원용) - 페이지네이션 포함
 async function fetchByOwner(table, ownerId) {
   if (sb) {
-    const allData = [];
-    const pageSize = 1000;
-    let from = 0;
-    while (true) {
-      const { data, error } = await sb
-        .from(table)
-        .select('*')
-        .eq('owner_id', ownerId)
-        .order('created_at', { ascending: true })
-        .range(from, from + pageSize - 1);
-      if (error) { console.error(`[${table}] 조회(owner):`, error.message); break; }
-      if (!data || data.length === 0) break;
-      allData.push(...data);
-      if (data.length < pageSize) break;
-      from += pageSize;
-    }
-    return allData;
+    return await fetchPagedParallel((p, size) => sb.from(table)
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: true })
+      .range(p * size, p * size + size - 1));
   }
   try {
     return JSON.parse(localStorage.getItem(`oha_${table}`) || '[]').filter(i => i.owner_id === ownerId);
@@ -282,20 +279,13 @@ function getCutoffDate(rangeDays) {
 async function fetchAdDataByRange(rangeDays) {
   const cutoff = getCutoffDate(rangeDays);
   if (sb) {
-    const allData = [];
-    const pageSize = 1000;
-    let from = 0;
-    while (true) {
-      let query = sb.from('ad_data').select('*').order('created_at', { ascending: true }).range(from, from + pageSize - 1);
+    return await fetchPagedParallel((p, size) => {
+      let query = sb.from('ad_data').select('*')
+        .order('date', { ascending: true }).order('id', { ascending: true })
+        .range(p * size, p * size + size - 1);
       if (cutoff) query = query.gte('date', cutoff);
-      const { data, error } = await query;
-      if (error) { console.error('[ad_data] 범위 조회:', error.message); break; }
-      if (!data || data.length === 0) break;
-      allData.push(...data);
-      if (data.length < pageSize) break;
-      from += pageSize;
-    }
-    return allData;
+      return query;
+    });
   }
   try {
     const items = JSON.parse(localStorage.getItem('oha_ad_data') || '[]');
@@ -306,20 +296,13 @@ async function fetchAdDataByRange(rangeDays) {
 async function fetchAdDataByRangeAndOwner(rangeDays, ownerId) {
   const cutoff = getCutoffDate(rangeDays);
   if (sb) {
-    const allData = [];
-    const pageSize = 1000;
-    let from = 0;
-    while (true) {
-      let query = sb.from('ad_data').select('*').eq('owner_id', ownerId).order('created_at', { ascending: true }).range(from, from + pageSize - 1);
+    return await fetchPagedParallel((p, size) => {
+      let query = sb.from('ad_data').select('*').eq('owner_id', ownerId)
+        .order('date', { ascending: true }).order('id', { ascending: true })
+        .range(p * size, p * size + size - 1);
       if (cutoff) query = query.gte('date', cutoff);
-      const { data, error } = await query;
-      if (error) { console.error('[ad_data] 범위 조회(owner):', error.message); break; }
-      if (!data || data.length === 0) break;
-      allData.push(...data);
-      if (data.length < pageSize) break;
-      from += pageSize;
-    }
-    return allData;
+      return query;
+    });
   }
   try {
     const items = JSON.parse(localStorage.getItem('oha_ad_data') || '[]').filter(i => i.owner_id === ownerId);
@@ -504,21 +487,13 @@ export async function fetchMappingsAll() {
 // ─── 리포트 확장: 키워드/매체/시간대 데이터 (기간 조회) ───
 async function fetchDimTable(table, ownerId, fromDate, toDate) {
   if (!sb) return [];
-  const all = [];
-  const pageSize = 1000;
-  let from = 0;
-  while (true) {
+  return await fetchPagedParallel((p, size) => {
     let q = sb.from(table).select('*').gte('date', fromDate).lte('date', toDate)
-      .order('date', { ascending: true }).range(from, from + pageSize - 1);
+      .order('date', { ascending: true }).order('id', { ascending: true })
+      .range(p * size, p * size + size - 1);
     if (ownerId) q = q.eq('owner_id', ownerId);
-    const { data, error } = await q;
-    if (error) { console.error(`[${table}] 조회:`, error.message); break; }
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    if (data.length < pageSize) break;
-    from += pageSize;
-  }
-  return all;
+    return q;
+  });
 }
 export const fetchReportKeyword = (ownerId, f, t) => fetchDimTable('report_keyword', ownerId, f, t);
 export const fetchReportMedia = (ownerId, f, t) => fetchDimTable('report_media', ownerId, f, t);
