@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
-import { fetchAdDataForReport, fetchMappingsAll } from '../store';
+import { fetchAdDaily } from '../store';
 import { fetchTodayPromises, fetchOpenPerfAlerts } from '../team';
 import { fmtWon, fmtNum } from '../utils';
 
@@ -18,14 +18,13 @@ const growth = (cur, prev) => (prev > 0 ? (cur - prev) / prev * 100 : (cur > 0 ?
 const sumM = (rows) => rows.reduce((a, r) => ({
   impressions: a.impressions + (+r.impressions || 0), clicks: a.clicks + (+r.clicks || 0),
   cost: a.cost + (+r.cost || 0), conversions: a.conversions + (+r.conversions || 0),
-  revenue: a.revenue + (+r.conv_revenue || 0),
+  revenue: a.revenue + (+(r.revenue ?? r.conv_revenue) || 0),
 }), { impressions: 0, clicks: 0, cost: 0, conversions: 0, revenue: 0 });
 const roasOf = (m) => m.cost > 0 ? m.revenue / m.cost * 100 : 0;
 
 export default function TodayAlerts({ currentUser, allowedBrands }) {
   const isAdmin = currentUser?.role === 'admin';
   const [adData, setAdData] = useState([]);
-  const [mappings, setMappings] = useState([]);
   const [promises, setPromises] = useState([]);
   const [perfAlerts, setPerfAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,30 +32,27 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [ad, mp, pr, pf] = await Promise.all([
-      fetchAdDataForReport(16, isAdmin ? null : currentUser.id),
-      fetchMappingsAll(),
+    const [ad, pr, pf] = await Promise.all([
+      fetchAdDaily(16, isAdmin ? null : currentUser.id),   // 서버 집계 테이블 (고속)
       fetchTodayPromises(ymd(new Date())),
       fetchOpenPerfAlerts(),
     ]);
-    setAdData(ad); setMappings(mp); setPromises(pr); setPerfAlerts(pf); setLoading(false);
+    setAdData(ad); setPromises(pr); setPerfAlerts(pf); setLoading(false);
   }, [isAdmin, currentUser]);
   useEffect(() => { load(); }, [load]);
 
   const alerts = useMemo(() => {
     if (!adData.length) return [];
-    const mapByKey = {}; mappings.forEach(m => mapByKey[m.match_key] = m);
     const today = ymd(new Date());
     const rEnd = addDays(today, -1), rStart = addDays(today, -7);          // 최근 7일 (어제까지)
     const pEnd = addDays(today, -8), pStart = addDays(today, -14);          // 직전 7일
     const last2 = addDays(today, -2);                                       // 최근 2일 시작
 
-    // 브랜드별 집계
+    // 브랜드별 집계 (ad_daily는 이미 브랜드 단위로 집계되어 있음)
     const byBrand = {};
     adData.forEach(r => {
-      const mp = mapByKey[r.match_key]; if (!mp) return;
-      if (allowedBrands && !allowedBrands.includes(mp.brand)) return;
-      const b = (byBrand[mp.brand] = byBrand[mp.brand] || { recent: [], prev: [], recentDaily: {} });
+      if (allowedBrands && !allowedBrands.includes(r.brand)) return;
+      const b = (byBrand[r.brand] = byBrand[r.brand] || { recent: [], prev: [], recentDaily: {} });
       if (r.date >= rStart && r.date <= rEnd) b.recent.push(r);
       if (r.date >= pStart && r.date <= pEnd) b.prev.push(r);
       if (r.date >= last2 && r.date <= rEnd) b.recentDaily[r.date] = (b.recentDaily[r.date] || 0) + (+r.impressions || 0);
@@ -90,7 +86,7 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
     });
     // 위험(high) 먼저
     return out.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === 'high' ? -1 : 1));
-  }, [adData, mappings, allowedBrands]);
+  }, [adData, allowedBrands]);
 
   const high = alerts.filter(a => a.sev === 'high').length;
   const sevColor = (s) => s === 'high' ? C.no : C.warn;
