@@ -532,6 +532,64 @@ export async function fetchAdDataWindow(fromDate, toDate, ownerId) {
   });
 }
 
+// ═══════════════════════════════════════════
+// 담당 직원 중앙 연동
+//   설정의 '담당 브랜드'가 유일한 기준.
+//   저장 시 순위 대상·후기 매장·카톡방 담당을 브랜드 이름으로 자동 맞춤.
+//   (각 페이지에서 개별 지정하면 다음 연동 실행 전까지 유지됩니다)
+// ═══════════════════════════════════════════
+export async function syncStaffAssignments() {
+  if (!sb) return { rank: 0, review: 0, chat: 0 };
+  const norm = (s) => (s || '').toLowerCase().replace(/[\s_\-·xX×()]/g, '');
+  const { data: users } = await sb.from('users').select('id,name,role,assigned_brands');
+  const pairs = [];
+  (users || []).filter(u => u.role === 'staff').forEach(u => {
+    let bs = []; try { bs = JSON.parse(u.assigned_brands || '[]'); } catch { /* ignore */ }
+    bs.forEach(b => pairs.push({ brand: b, id: u.id, name: u.name }));
+  });
+  const findOwner = (label) => {
+    const nl = norm(label); if (!nl) return null;
+    return pairs.find(p => { const nb = norm(p.brand); return nb && (nl.includes(nb) || nb.includes(nl)); }) || null;
+  };
+  let cr = 0, cv = 0, cc = 0;
+  // 1) 순위 체크 대상
+  const { data: rps } = await sb.from('rank_products').select('id,brand,owner_id');
+  for (const it of (rps || [])) {
+    const o = findOwner(it.brand);
+    if (o && it.owner_id !== o.id) {
+      await sb.from('rank_products').update({ owner_id: o.id, staff_name: o.name }).eq('id', it.id); cr++;
+    }
+  }
+  // 2) 후기 체크 매장
+  const [{ data: sm }, { data: rp2 }] = await Promise.all([
+    sb.from('review_store_map').select('store,brand,owner_id'),
+    sb.from('review_products').select('store'),
+  ]);
+  const mapByStore = {}; (sm || []).forEach(r => { mapByStore[r.store] = r; });
+  const allStores = [...new Set((rp2 || []).map(r => r.store))];
+  for (const s of allStores) {
+    const cur = mapByStore[s];
+    const o = findOwner((cur && cur.brand) || s) || findOwner(s);
+    if (o && (!cur || cur.owner_id !== o.id)) {
+      await sb.from('review_store_map').upsert(
+        { store: s, owner_id: o.id, brand: (cur && cur.brand) || s, updated_at: new Date().toISOString() }, { onConflict: 'store' });
+      await sb.from('review_checks').update({ owner_id: o.id }).eq('store', s);
+      cv++;
+    }
+  }
+  // 3) 대화 분석 카톡방
+  const { data: rooms } = await sb.from('chat_room_owner').select('room_name,client_name,owner_id');
+  for (const r of (rooms || [])) {
+    const o = findOwner(r.client_name) || findOwner(r.room_name);
+    if (o && r.owner_id !== o.id) {
+      await sb.from('chat_room_owner').update({ owner_id: o.id, staff_name: o.name, updated_at: new Date().toISOString() }).eq('room_name', r.room_name);
+      await sb.from('chat_uploads').update({ owner_id: o.id, uploader_name: o.name }).eq('room_name', r.room_name);
+      cc++;
+    }
+  }
+  return { rank: cr, review: cv, chat: cc };
+}
+
 // 전체 데이터 정확한 건수 (설정 화면 표시용 — 행을 내려받지 않고 개수만 조회)
 export async function countAdData() {
   if (!sb) return 0;
