@@ -12,7 +12,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { C } from '../config';
 import { fmt, hashPin, uid } from '../utils';
-import { fetchUsers, createUser, deleteUser, updateUser, fetchShareLinks, createShareLink, deleteShareLink } from '../store';
+import { fetchUsers, createUser, deleteUser, updateUser, fetchShareLinks, createShareLink, deleteShareLink, countAdData } from '../store';
 
 export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
   const [msg, setMsg] = useState('');
@@ -34,11 +34,13 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
   }, [data.mappings]);
 
   // ─── 초기 로드 ───
+  const [totalRows, setTotalRows] = useState(null);   // 전체 기간 정확한 건수
   useEffect(() => {
     if (isAdmin) {
       fetchUsers().then(setUsers);
       fetchShareLinks().then(setShareLinks);
     }
+    countAdData().then(setTotalRows);
   }, [isAdmin]);
 
   // ─── 직원 추가 ───
@@ -324,8 +326,9 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>📊 데이터 현황</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
           <div style={stat}>
-            <div style={{ fontSize: 11, color: C.txd }}>총 데이터</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: C.ac }}>{fmt(data.adData.length)}건</div>
+            <div style={{ fontSize: 11, color: C.txd }}>총 데이터 (전체 기간)</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.ac }}>{totalRows === null ? '…' : fmt(totalRows)}건</div>
+            <div style={{ fontSize: 10.5, color: C.txm }}>화면에 로드된 기간: {fmt(data.adData.length)}건</div>
           </div>
           <div style={stat}>
             <div style={{ fontSize: 11, color: C.txd }}>매핑 설정</div>
