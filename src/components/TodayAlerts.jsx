@@ -33,12 +33,14 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
   const load = useCallback(async () => {
     setLoading(true);
     const [ad, pr, pf] = await Promise.all([
-      fetchAdDaily(16, isAdmin ? null : currentUser.id),   // 서버 집계 테이블 (고속)
+      fetchAdDaily(16, null),   // 서버 집계 테이블 — 전체 로드 후 담당 브랜드로 필터
       fetchTodayPromises(ymd(new Date())),
       fetchOpenPerfAlerts(),
     ]);
-    setAdData(ad); setPromises(pr); setPerfAlerts(pf); setLoading(false);
-  }, [isAdmin, currentUser]);
+    // 직원/공유 모드: 담당 브랜드 것만 표시
+    const inBrands = (b) => !allowedBrands || !b || allowedBrands.includes(b);
+    setAdData(ad); setPromises((pr || []).filter(p => inBrands(p.brand))); setPerfAlerts((pf || []).filter(p => inBrands(p.brand))); setLoading(false);
+  }, [isAdmin, currentUser, allowedBrands]);
   useEffect(() => { load(); }, [load]);
 
   const alerts = useMemo(() => {
