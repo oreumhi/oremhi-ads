@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
-import { fetchAdDataForReport, fetchMappingsAll } from '../store';
+import { fetchAdDataWindow, fetchMappingsAll } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
 const won = (n) => '₩' + fmtNum(Math.round(n || 0));
@@ -38,8 +38,10 @@ export default function Proposals({ currentUser, allowedBrands }) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const today = new Date(); const from = new Date(); from.setDate(from.getDate() - 15);
+    const ds = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const [ad, mp] = await Promise.all([
-      fetchAdDataForReport(16, isAdmin ? null : currentUser.id),
+      fetchAdDataWindow(ds(from), ds(today), isAdmin ? null : currentUser.id),   // 필요 컬럼만 (전송량 절감)
       fetchMappingsAll(),
     ]);
     setAdData(ad); setMappings(mp); setLoading(false);
