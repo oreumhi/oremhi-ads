@@ -279,11 +279,23 @@ function getCutoffDate(rangeDays) {
   return toLocalDateStr(d); // 로컬(한국시간) 기준
 }
 
+// ─── 기간에 따른 데이터 원천 자동 선택 (전부 같은 컬럼명이라 화면 코드는 동일하게 작동) ───
+//   1~30일  : ad_data   (일별 원본 — 상세)
+//   90~365일: ad_weekly (광고×주 서버 집계 — 7분의 1 크기)
+//   전체(0) : ad_monthly(광고×월 서버 집계 — 30분의 1 크기)
+function tableForRange(rangeDays) {
+  if (!rangeDays || rangeDays <= 0) return 'ad_monthly';
+  if (rangeDays >= 90) return 'ad_weekly';
+  return 'ad_data';
+}
+export const granForRange = (rangeDays) => tableForRange(rangeDays);
+
 async function fetchAdDataByRange(rangeDays) {
   const cutoff = getCutoffDate(rangeDays);
+  const table = tableForRange(rangeDays);
   if (sb) {
     return await fetchPagedParallel((p, size) => {
-      let query = sb.from('ad_data').select('*')
+      let query = sb.from(table).select('*')
         .order('date', { ascending: true }).order('id', { ascending: true })
         .range(p * size, p * size + size - 1);
       if (cutoff) query = query.gte('date', cutoff);
@@ -298,9 +310,10 @@ async function fetchAdDataByRange(rangeDays) {
 
 async function fetchAdDataByRangeAndOwner(rangeDays, ownerId) {
   const cutoff = getCutoffDate(rangeDays);
+  const table = tableForRange(rangeDays);
   if (sb) {
     return await fetchPagedParallel((p, size) => {
-      let query = sb.from('ad_data').select('*').eq('owner_id', ownerId)
+      let query = sb.from(table).select('*').eq('owner_id', ownerId)
         .order('date', { ascending: true }).order('id', { ascending: true })
         .range(p * size, p * size + size - 1);
       if (cutoff) query = query.gte('date', cutoff);
@@ -386,10 +399,11 @@ export function useStore(currentUser) {
 
   // 기간 변경 시 호출 (Dashboard에서 호출)
   const changeRange = useCallback(async (newRange) => {
-    // 이미 로드된 범위보다 작거나 같으면 재요청 불필요
-    // (0 = 전체, 양수 = 일수, 전체는 항상 재요청)
-    if (newRange > 0 && loadedRange >= newRange && loadedRange > 0) return;
-    if (newRange === 0 && loadedRange === 0) return;
+    // 데이터 원천(일별/주별/월별)이 같고 이미 충분한 범위가 로드돼 있으면 재요청 불필요
+    const sameGran = granForRange(newRange) === granForRange(loadedRange);
+    if (sameGran && newRange > 0 && loadedRange >= newRange && loadedRange > 0) return;
+    if (sameGran && newRange === 0 && loadedRange === 0) return;
+    if (sameGran && newRange > 0 && granForRange(newRange) === 'ad_weekly' && loadedRange > 0 && loadedRange >= newRange) return;
     setRangeLoading(true); // 작은 인디케이터만 (전체 화면 로딩 X)
     try {
       await loadDataInternal(newRange);
