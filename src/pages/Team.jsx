@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
-import { fetchUsers, fetchAdDataForReport, fetchMappingsAll } from '../store';
+import { fetchUsers, fetchAdDaily } from '../store';
 import {
   fetchReportsByDate, fetchMyReports, fetchReportsRange, upsertDailyReport, setCeoComment,
   fetchMeetings, addMeeting, updateMeeting, deleteMeeting,
@@ -319,30 +319,27 @@ function Scoreboard({ users }) {
   const [reports, setReports] = useState([]);
   const [actions, setActions] = useState([]);
   const [adData, setAdData] = useState([]);
-  const [mappings, setMappings] = useState([]);
   const [loading, setLoading] = useState(true);
   const td = todayStr(); const from7 = addDays(td, -6); const from14 = addDays(td, -13);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [rs, as, ad, mp] = await Promise.all([
-        fetchReportsRange(from7, td), fetchAllActions(500), fetchAdDataForReport(15, null), fetchMappingsAll(),
+      const [rs, as, ad] = await Promise.all([
+        fetchReportsRange(from7, td), fetchAllActions(500), fetchAdDaily(15, null),   // 서버 집계 (고속)
       ]);
       if (!alive) return;
-      setReports(rs); setActions(as); setAdData(ad || []); setMappings(mp || []); setLoading(false);
+      setReports(rs); setActions(as); setAdData(ad || []); setLoading(false);
     })();
     return () => { alive = false; };
   }, []);
 
   const rows = useMemo(() => {
-    const mapByKey = {}; mappings.forEach(m => { mapByKey[m.match_key] = m.brand; });
-    const brandAgg = {};   // brand -> {rc, rr, pc, pr}
+    const brandAgg = {};   // brand -> {rc, rr, pc, pr}  (ad_daily: 이미 브랜드 단위 집계)
     adData.forEach(r => {
-      const b = mapByKey[r.match_key]; if (!b) return;
-      const o = (brandAgg[b] = brandAgg[b] || { rc: 0, rr: 0, pc: 0, pr: 0 });
-      if (r.date >= from7) { o.rc += +r.cost || 0; o.rr += +r.conv_revenue || 0; }
-      else if (r.date >= from14) { o.pc += +r.cost || 0; o.pr += +r.conv_revenue || 0; }
+      const o = (brandAgg[r.brand] = brandAgg[r.brand] || { rc: 0, rr: 0, pc: 0, pr: 0 });
+      if (r.date >= from7) { o.rc += +r.cost || 0; o.rr += +r.revenue || 0; }
+      else if (r.date >= from14) { o.pc += +r.cost || 0; o.pr += +r.revenue || 0; }
     });
     return users.filter(u => u.role !== 'admin').map(u => {
       const myReports = new Set(reports.filter(r => r.owner_id === u.id).map(r => r.report_date));
@@ -357,7 +354,7 @@ function Scoreboard({ users }) {
       const roasPrev = pc > 0 ? pr / pc * 100 : 0;
       return { u, submit: myReports.size, actTotal: myActs.length, actDone: doneActs, overdue, brands, rc, rr, roasNow, roasPrev };
     });
-  }, [users, reports, actions, adData, mappings]);
+  }, [users, reports, actions, adData]);
 
   const cell = { padding: '9px 10px', fontSize: 13, borderTop: `1px solid ${C.bd}`, whiteSpace: 'nowrap' };
   const head = { ...cell, fontSize: 12, color: C.txd, fontWeight: 700, borderTop: 'none', whiteSpace: 'nowrap' };
