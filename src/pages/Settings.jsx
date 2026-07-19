@@ -12,7 +12,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { C } from '../config';
 import { fmt, hashPin, uid } from '../utils';
-import { fetchUsers, createUser, deleteUser, updateUser, fetchShareLinks, createShareLink, deleteShareLink, countAdData } from '../store';
+import { fetchUsers, createUser, deleteUser, updateUser, fetchShareLinks, createShareLink, deleteShareLink, countAdData, syncStaffAssignments } from '../store';
 
 export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
   const [msg, setMsg] = useState('');
@@ -61,8 +61,10 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
     if (user) {
       setUsers(prev => [...prev, user]);
       setNewStaff({ name: '', username: '', password: '' });
+      const hadBrands = selectedBrands.length > 0;
       setSelectedBrands([]);
-      setMsg('✅ 직원 계정이 생성되었습니다' + (selectedBrands.length === 0 ? ' (브랜드는 나중에 배정 가능)' : ''));
+      if (hadBrands) await runSync('✅ 직원 생성 →');
+      else setMsg('✅ 직원 계정이 생성되었습니다 (브랜드는 나중에 배정 가능)');
     } else {
       setMsg('❌ 계정 생성 실패');
     }
@@ -89,12 +91,23 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
     setEditBrands(prev => prev.includes(brand) ? prev.filter(b => b !== brand) : [...prev, brand]);
   };
 
+  // 담당 브랜드 기준으로 순위·후기·카톡방 담당을 자동 맞춤
+  const runSync = async (prefix) => {
+    setMsg((prefix || '') + ' 담당 연동 중…');
+    try {
+      const r = await syncStaffAssignments();
+      setMsg(`${prefix || '✅'} 담당 연동 완료 — 순위 ${r.rank}건 · 후기 ${r.review}매장 · 카톡방 ${r.chat}개 갱신`);
+    } catch {
+      setMsg('⚠ 담당 연동 중 오류 — 잠시 후 아래 [담당 일괄 연동] 버튼으로 다시 시도하세요');
+    }
+  };
+
   const handleSaveBrands = async () => {
     if (await updateUser(editingUserId, { assigned_brands: JSON.stringify(editBrands) })) {
       setUsers(prev => prev.map(u => u.id === editingUserId ? { ...u, assigned_brands: JSON.stringify(editBrands) } : u));
       setEditingUserId(null);
       setEditBrands([]);
-      setMsg('✅ 담당 브랜드가 변경되었습니다');
+      await runSync('✅ 담당 브랜드 변경 →');
     }
   };
 
@@ -168,7 +181,14 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
       {/* ═══ 관리자 전용: 직원 계정 관리 ═══ */}
       {isAdmin && (
         <div style={card}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>👤 직원 계정 관리</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>👤 직원 계정 관리</div>
+            <button style={{ background: 'none', border: `1px solid ${C.bd}`, borderRadius: 8, padding: '6px 12px', color: C.ac, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+              onClick={() => runSync('🔄')}>🔄 담당 일괄 연동</button>
+          </div>
+          <div style={{ fontSize: 12, color: C.txd, marginBottom: 12 }}>
+            여기서 배정한 담당 브랜드가 기준입니다. 저장하면 <b>순위 체크 대상 · 후기 매장 · 대화분석 카톡방</b>의 담당 직원이 브랜드 이름 기준으로 자동으로 맞춰집니다. (각 페이지에서 개별 지정한 예외는 다음 연동 때 다시 맞춰집니다)
+          </div>
 
           {/* 기존 계정 목록 */}
           {users.filter(u => u.id !== currentUser?.id).length > 0 && (
