@@ -141,6 +141,7 @@ export async function upsertAdData(items, onProgress) {
         totalInserted += data?.length || batch.length;
       }
     }
+    notifyAggChanged(); // 서버 집계 재계산 예약
     return { inserted: totalInserted, updated: totalUpdated };
   }
 
@@ -165,6 +166,7 @@ export async function deleteMappingByKey(matchKey, ownerId) {
     let query = sb.from('mappings').delete().eq('match_key', matchKey);
     if (ownerId) query = query.eq('owner_id', ownerId);
     const { error } = await query;
+    if (!error) notifyAggChanged();
     return !error;
   }
   try {
@@ -182,6 +184,7 @@ export async function deleteMappingsByBrand(brand, ownerId) {
     let query = sb.from('mappings').delete().eq('brand', brand);
     if (ownerId) query = query.eq('owner_id', ownerId);
     const { error } = await query;
+    if (!error) notifyAggChanged();
     return !error;
   }
   try {
@@ -408,6 +411,7 @@ export function useStore(currentUser) {
     const item = { ...mapping, id: uid(), owner_id: ownerId || null };
     const r = await insertItem('mappings', item);
     if (r) {
+      notifyAggChanged();
       setData(prev => ({ ...prev, mappings: [...prev.mappings, item] }));
       return true;
     }
@@ -451,6 +455,7 @@ export function useStore(currentUser) {
     } else {
       localStorage.removeItem('oha_ad_data');
     }
+    notifyAggChanged();
     setData(prev => ({ ...prev, adData: [] }));
   }, [isStaff, ownerId]);
 
@@ -470,6 +475,7 @@ export function useStore(currentUser) {
         localStorage.setItem('oha_ad_data', JSON.stringify(items));
       } catch { /* ignore */ }
     }
+    notifyAggChanged();
     await loadData(loadedRange || 7);
   }, [ownerId, loadData, loadedRange]);
 
@@ -482,6 +488,44 @@ export async function fetchAdDataForReport(rangeDays, ownerId) {
 }
 export async function fetchMappingsAll() {
   return await fetchAll('mappings');
+}
+
+// ═══════════════════════════════════════════
+// 서버 집계 테이블(ad_daily) — 고속 조회
+//   날짜×브랜드×광고유형×출처 로 미리 집계된 테이블.
+//   원본(ad_data) 수십만 행 대신 수천 행만 내려받아 즉시 표시.
+//   갱신: DB 내부 스케줄러(pg_cron)가 5분마다(변경 시)·매일 06시(전체) 자동 재집계.
+// ═══════════════════════════════════════════
+export async function fetchAdDaily(rangeDays, ownerId) {
+  if (!sb) return [];
+  const cutoff = getCutoffDate(rangeDays);
+  return await fetchPagedParallel((p, size) => {
+    let q = sb.from('ad_daily').select('*')
+      .order('date', { ascending: true }).order('id', { ascending: true })
+      .range(p * size, p * size + size - 1);
+    if (cutoff) q = q.gte('date', cutoff);
+    if (ownerId) q = q.eq('owner_id', ownerId);
+    return q;
+  });
+}
+
+// 원본 상세 조회 (기간 한정 + 필요한 컬럼만 → 전송량 절감)
+export async function fetchAdDataWindow(fromDate, toDate, ownerId) {
+  if (!sb) return [];
+  return await fetchPagedParallel((p, size) => {
+    let q = sb.from('ad_data')
+      .select('date,match_key,source,cost,impressions,clicks,conversions,conv_revenue,group_name,material_id')
+      .gte('date', fromDate).lte('date', toDate)
+      .order('date', { ascending: true }).order('id', { ascending: true })
+      .range(p * size, p * size + size - 1);
+    if (ownerId) q = q.eq('owner_id', ownerId);
+    return q;
+  });
+}
+
+// 데이터/매핑 변경 알림 → DB가 5분 내 자동 재집계 (즉시 반환, 실패해도 무해)
+export function notifyAggChanged() {
+  if (sb) { try { sb.rpc('mark_ad_daily_dirty').then(() => {}, () => {}); } catch { /* ignore */ } }
 }
 
 // ─── 리포트 확장: 키워드/매체/시간대 데이터 (기간 조회) ───
