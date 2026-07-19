@@ -228,9 +228,9 @@ export default function Report({ currentUser, allowedBrands }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const ad = await fetchAdDaily(70, isAdmin ? null : currentUser.id);   // 서버 집계 — 수천 행, 1초 미만
+    const ad = await fetchAdDaily(70, null);   // 서버 집계 — 전체 로드, 브랜드 목록은 allowedBrands(담당)로 필터
     setAgg(ad); setLoading(false);
-  }, [isAdmin, currentUser]);
+  }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { fetchMappingsAll().then(setMappings); }, []);   // 광고별 상세 라벨용 (지연)
 
@@ -248,12 +248,11 @@ export default function Report({ currentUser, allowedBrands }) {
 
   useEffect(() => {
     let alive = true;
-    const oid = isAdmin ? null : currentUser.id;
     Promise.all([
-      fetchReportKeyword(oid, thisFrom, thisTo), fetchReportMedia(oid, thisFrom, thisTo), fetchReportHour(oid, thisFrom, thisTo), fetchReportDemo(oid, thisFrom, thisTo),
+      fetchReportKeyword(null, thisFrom, thisTo), fetchReportMedia(null, thisFrom, thisTo), fetchReportHour(null, thisFrom, thisTo), fetchReportDemo(null, thisFrom, thisTo),
     ]).then(([k, m, h, dm]) => { if (alive) { setKwData(k); setMediaData(m); setHourData(h); setDemoData(dm); } });
     return () => { alive = false; };
-  }, [thisFrom, thisTo, isAdmin, currentUser]);
+  }, [thisFrom, thisTo]);
 
   const acctBase = (a) => (a || '').replace(/_(SA|GFA|통합).*$/,'').replace(/\(.*\)/,'').trim();
 
@@ -272,10 +271,10 @@ export default function Report({ currentUser, allowedBrands }) {
   useEffect(() => {
     let alive = true;
     setDetailLoading(true);
-    fetchAdDataWindow(thisFrom, thisTo, isAdmin ? null : currentUser.id)
+    fetchAdDataWindow(thisFrom, thisTo, null)
       .then(rows => { if (alive) { setDetailRows(rows); setDetailLoading(false); } });
     return () => { alive = false; };
-  }, [thisFrom, thisTo, isAdmin, currentUser]);
+  }, [thisFrom, thisTo]);
 
   const detailThis = useMemo(() => detailRows.filter(r => {
     const mp = mapByKey[r.match_key];
