@@ -406,15 +406,16 @@ export default function Report({ currentUser, allowedBrands }) {
 
   // 기간 비교표 행
   const cmpRows = METRICS.map(mt => {
-    const cv = mt.get(cur), pv = mt.get(prev), diff = cv - pv, g = growth(cv, pv), good = mt.invert ? diff <= 0 : diff >= 0;
-    const col = Math.abs(g) < 0.05 ? R.sub : good ? R.ok : R.no;
+    const cv = mt.get(cur), pv = mt.get(prev), diff = cv - pv, g = growth(cv, pv);
+    // 색상은 '부호' 기준으로 통일: 증가(+)=초록, 감소(−)=빨강, 변화없음=회색
+    const col = (Math.abs(g) < 0.05 && diff === 0) ? R.sub : diff > 0 ? R.ok : diff < 0 ? R.no : R.sub;
     return {
-      label: mt.label,
+      label: mt.label + (mt.invert ? ' ↓좋음' : ''),
       cells: [
         { v: mt.fmt(cv), bold: true },
         { v: mt.fmt(pv), color: R.sub },
         { v: (diff >= 0 ? '+' : '−') + mt.fmt(Math.abs(diff)), color: col },
-        { v: (g >= 0 ? '+' : '') + g.toFixed(1) + '%', color: col, bold: true },
+        { v: (g > 0 ? '+' : g < 0 ? '−' : '') + Math.abs(g).toFixed(1) + '%', color: col, bold: true },
       ],
     };
   });
@@ -487,7 +488,7 @@ export default function Report({ currentUser, allowedBrands }) {
           </div>
 
           {/* 기간 상세 비교 */}
-          <Section title="기간 상세 비교" sub={`이번 ${P.label}(${kdate(thisFrom)}~${kdate(thisTo)}) vs 전기간(${kdate(prevFrom)}~${kdate(prevTo)}) — 전 지표`}>
+          <Section title="기간 상세 비교" sub={`이번 ${P.label}(${kdate(thisFrom)}~${kdate(thisTo)}) vs 전기간(${kdate(prevFrom)}~${kdate(prevTo)}) — 전 지표 · 증가(+)는 초록, 감소(−)는 빨강 · '↓좋음' 표시 지표는 낮을수록 좋습니다`}>
             <MetricTable head={['지표', '이번 기간', '전기간', '증감', '증감률']} rows={cmpRows} />
           </Section>
 
