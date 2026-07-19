@@ -361,16 +361,22 @@ export function findUnmappedKeys(adData, mappings) {
   // match_key별 대표 정보 수집
   const unmapped = new Map();
   adData.forEach(row => {
-    if (!mappedKeys.has(row.match_key) && !unmapped.has(row.match_key)) {
-      unmapped.set(row.match_key, {
-        match_key: row.match_key,
-        ad_type: row.ad_type,
-        campaign_name: row.campaign_name,
-        group_name: row.group_name,
-        group_id: row.group_id,
-        material_id: row.material_id,
-        source: row.source,
-      });
+    if (!mappedKeys.has(row.match_key)) {
+      const ex = unmapped.get(row.match_key);
+      if (!ex) {
+        unmapped.set(row.match_key, {
+          match_key: row.match_key,
+          ad_type: row.ad_type,
+          campaign_name: row.campaign_name,
+          group_name: row.group_name,
+          group_id: row.group_id,
+          material_id: row.material_id,
+          source: row.source,
+          account: row.account || null,
+        });
+      } else if (!ex.account && row.account) {
+        ex.account = row.account;   // 업체 정보가 있는 행을 만나면 채움
+      }
     }
   });
 
