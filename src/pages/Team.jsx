@@ -77,7 +77,9 @@ function MyDaily({ currentUser, onSaved }) {
     <div>
       <Section title={`오늘 보고 쓰기 — ${kdw(td)}`}
         sub="3줄이면 충분합니다. 몇 시에 일했는지가 아니라 무엇이 진행됐는지를 공유하는 자리입니다."
-        right={submitted ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출 완료 · 수정 가능</span> : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}>
+        right={submitted ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출 완료 · 수정 가능</span>
+          : [0, 6].includes(new Date(td + 'T00:00:00').getDay()) ? <span style={badge('rgba(136,144,166,0.15)', C.txd)}>주말 — 제출은 선택</span>
+          : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}>
         <div style={{ display: 'grid', gap: 10 }}>
           <div><div style={label}>① 오늘 한 일 · 성과</div>
             <textarea style={ta} value={form.done} placeholder="예) 모그라미 여름 프로모션 소재 3종 교체, ROAS 낮은 키워드 12개 제외" onChange={e => setForm(f => ({ ...f, done: e.target.value }))} /></div>
@@ -130,6 +132,7 @@ function DailyAdmin({ users, currentUser }) {
 
   const byOwner = {}; reports.forEach(r => { byOwner[r.owner_id] = r; });
   const submitted = staff.filter(u => byOwner[u.id]).length;
+  const isWknd = [0, 6].includes(new Date(date + 'T00:00:00').getDay());   // 주말은 미제출을 빨갛게 표시하지 않음
 
   return (
     <div>
@@ -140,17 +143,19 @@ function DailyAdmin({ users, currentUser }) {
             <button style={btn} onClick={() => setDate(addDays(date, -1))}>◀</button>
             <input type="date" style={{ ...inp, width: 150 }} value={date} max={todayStr()} onChange={e => setDate(e.target.value)} />
             <button style={btn} disabled={date >= todayStr()} onClick={() => setDate(addDays(date, 1))}>▶</button>
-            <span style={badge(submitted === staff.length && staff.length > 0 ? 'rgba(61,217,160,0.15)' : 'rgba(240,164,69,0.15)', submitted === staff.length && staff.length > 0 ? C.ok : C.warn)}>{submitted}/{staff.length} 제출</span>
+            <span style={badge(submitted === staff.length && staff.length > 0 ? 'rgba(61,217,160,0.15)' : isWknd ? 'rgba(136,144,166,0.15)' : 'rgba(240,164,69,0.15)', submitted === staff.length && staff.length > 0 ? C.ok : isWknd ? C.txd : C.warn)}>{isWknd ? '주말 · ' : ''}{submitted}/{staff.length} 제출</span>
           </div>
         }>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
           {staff.map(u => {
             const r = byOwner[u.id];
             return (
-              <div key={u.id} style={{ background: C.sf2, border: `1px solid ${r ? C.bd : 'rgba(240,112,112,0.5)'}`, borderRadius: 10, padding: 14 }}>
+              <div key={u.id} style={{ background: C.sf2, border: `1px solid ${r || isWknd ? C.bd : 'rgba(240,112,112,0.5)'}`, borderRadius: 10, padding: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontWeight: 800, fontSize: 14 }}>{u.name}</span>
-                  {r ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출</span> : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}
+                  {r ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출</span>
+                    : isWknd ? <span style={badge('rgba(136,144,166,0.15)', C.txd)}>주말</span>
+                    : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}
                 </div>
                 {r ? (
                   <div>
@@ -321,6 +326,9 @@ function Scoreboard({ users }) {
   const [adData, setAdData] = useState([]);
   const [loading, setLoading] = useState(true);
   const td = todayStr(); const from7 = addDays(td, -6); const from14 = addDays(td, -13);
+  // 최근 7일 중 평일 수 (보고 제출 기준은 평일만)
+  const wdCnt = Array.from({ length: 7 }, (_, i) => addDays(from7, i))
+    .filter(d => ![0, 6].includes(new Date(d + 'T00:00:00').getDay())).length;
 
   useEffect(() => {
     let alive = true;
@@ -366,7 +374,7 @@ function Scoreboard({ users }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr>
               <th style={{ ...head, textAlign: 'left' }}>직원</th>
-              <th style={head}>보고 제출 (7일)</th>
+              <th style={head}>보고 제출 (최근 7일 · 평일 기준)</th>
               <th style={head}>액션 완료</th>
               <th style={head}>지연 액션</th>
               <th style={{ ...head, textAlign: 'left' }}>담당 브랜드</th>
@@ -380,8 +388,8 @@ function Scoreboard({ users }) {
                   <tr key={u.id}>
                     <td style={{ ...cell, fontWeight: 800 }}>{u.name}</td>
                     <td style={{ ...cell, textAlign: 'center' }}>
-                      <span style={{ color: submit >= 5 ? C.ok : submit >= 3 ? C.warn : C.no, fontWeight: 800 }}>{submit}</span>
-                      <span style={{ color: C.txm }}>/7일</span>
+                      <span style={{ color: submit >= wdCnt ? C.ok : submit >= Math.max(1, wdCnt - 2) ? C.warn : C.no, fontWeight: 800 }}>{submit}</span>
+                      <span style={{ color: C.txm }}>/{wdCnt}일</span>
                     </td>
                     <td style={{ ...cell, textAlign: 'center' }}>{actTotal === 0 ? <span style={{ color: C.txm }}>—</span> :
                       <span style={{ color: actDone === actTotal ? C.ok : C.tx }}>{actDone}/{actTotal}</span>}</td>
@@ -399,7 +407,7 @@ function Scoreboard({ users }) {
             </tbody>
           </table>
           <div style={{ fontSize: 12, color: C.txm, marginTop: 10 }}>
-            · 보고 제출: 최근 7일 중 제출한 날 수 · 액션: 본인 담당 전체 대비 완료 · 브랜드 성과: 담당 브랜드 합산, 매출·ROAS는 구매완료 기준
+            · 보고 제출: 최근 7일 중 제출한 날 수 (기준은 평일 {wdCnt}일) · 액션: 본인 담당 전체 대비 완료 · 브랜드 성과: 담당 브랜드 합산, 매출·ROAS는 구매완료 기준
           </div>
         </div>
       )}
