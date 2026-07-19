@@ -46,12 +46,13 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
   const unmappedByAccount = useMemo(() => {
     const groups = {};
     unmapped.forEach(item => {
-      const acc = item.account || '❓ 업체 미확인 (과거·삭제된 광고)';
+      // 업체 정보가 없는 과거 데이터는 캠페인명으로 소그룹핑 (담당자가 알아보기 쉽게)
+      const acc = item.account || ('❓ ' + (item.campaign_name || '캠페인 미상') + ' (과거 데이터)');
       (groups[acc] = groups[acc] || []).push(item);
     });
     return Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
   }, [unmapped]);
-  const accountBrand = (acc) => (acc || '').replace(/_(SA|GFA|통합).*$/, '').replace(/\(.*\)/, '').trim();
+  const accountBrand = (acc) => (acc || '').replace(/^❓ /, '').replace(/ \(과거 데이터\)$/, '').replace(/_(SA|GFA|통합).*$/, '').replace(/\(.*\)/, '').replace(/^P\d+\s*:\s*/, '').trim();
 
   // 매핑: 브랜드>제품별 그룹
   const mappedByBrand = useMemo(() => {
