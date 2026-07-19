@@ -41,7 +41,7 @@ export default function Proposals({ currentUser, allowedBrands }) {
     const today = new Date(); const from = new Date(); from.setDate(from.getDate() - 15);
     const ds = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const [ad, mp] = await Promise.all([
-      fetchAdDataWindow(ds(from), ds(today), isAdmin ? null : currentUser.id),   // 필요 컬럼만 (전송량 절감)
+      fetchAdDataWindow(ds(from), ds(today), null),   // 전체 로드 — 담당 브랜드는 allowedBrands로 필터
       fetchMappingsAll(),
     ]);
     setAdData(ad); setMappings(mp); setLoading(false);
