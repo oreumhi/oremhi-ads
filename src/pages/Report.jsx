@@ -5,7 +5,7 @@
 // ============================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchAdDataForReport, fetchMappingsAll, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
+import { fetchAdDaily, fetchAdDataWindow, fetchMappingsAll, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
 const R = {
@@ -214,7 +214,9 @@ export default function Report({ currentUser, allowedBrands }) {
   const [channel, setChannel] = useState('search'); // 'search' | 'gfa'
   const [refDate, setRefDate] = useState(addDays(ymd(new Date()), -1));
   const [brand, setBrand] = useState('');
-  const [adData, setAdData] = useState([]);
+  const [agg, setAgg] = useState([]);               // 서버 집계 (브랜드×일자×유형) — 즉시 표시용
+  const [detailRows, setDetailRows] = useState([]); // 광고별 상세 (이번 기간만) — 상위/낭비 광고용 지연 로딩
+  const [detailLoading, setDetailLoading] = useState(true);
   const [mappings, setMappings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
@@ -226,17 +228,18 @@ export default function Report({ currentUser, allowedBrands }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [ad, mp] = await Promise.all([fetchAdDataForReport(70, isAdmin ? null : currentUser.id), fetchMappingsAll()]);
-    setAdData(ad); setMappings(mp); setLoading(false);
+    const ad = await fetchAdDaily(70, isAdmin ? null : currentUser.id);   // 서버 집계 — 수천 행, 1초 미만
+    setAgg(ad); setLoading(false);
   }, [isAdmin, currentUser]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { fetchMappingsAll().then(setMappings); }, []);   // 광고별 상세 라벨용 (지연)
 
   const mapByKey = useMemo(() => { const m = {}; mappings.forEach(x => m[x.match_key] = x); return m; }, [mappings]);
   const brands = useMemo(() => {
     const s = new Set();
-    adData.forEach(r => { const mp = mapByKey[r.match_key]; if (mp && (!allowedBrands || allowedBrands.includes(mp.brand))) s.add(mp.brand); });
+    agg.forEach(r => { if (!allowedBrands || allowedBrands.includes(r.brand)) s.add(r.brand); });
     return [...s].sort();
-  }, [adData, mapByKey, allowedBrands]);
+  }, [agg, allowedBrands]);
   useEffect(() => { if (!brand && brands.length) setBrand(brands[0]); }, [brands, brand]);
 
   const P = PERIODS[ptype];
@@ -252,25 +255,34 @@ export default function Report({ currentUser, allowedBrands }) {
     return () => { alive = false; };
   }, [thisFrom, thisTo, isAdmin, currentUser]);
 
-  // 브랜드 매핑용 (캠페인→브랜드, 광고그룹→브랜드)
-  const campByBrand = useMemo(() => { const m = {}; mappings.forEach(x => { if (x.campaign_name && !m[x.campaign_name]) m[x.campaign_name] = x.brand; }); return m; }, [mappings]);
-  const groupByBrand = useMemo(() => {
-    const m = {};
-    mappings.forEach(x => { const p = (x.match_key || '').split('||'); if ((p[0] === 'PL' || p[0] === 'BR') && p[2] && !m[p[2]]) m[p[2]] = x.brand; if (x.label && !m[x.label]) m[x.label] = x.brand; });
-    return m;
-  }, [mappings]);
   const acctBase = (a) => (a || '').replace(/_(SA|GFA|통합).*$/,'').replace(/\(.*\)/,'').trim();
 
-    const rowsOf = (from, to) => adData.filter(r => {
+  // 서버 집계 행 → 기간·채널 필터 (브랜드 단위 지표용)
+  const rowsOf = (from, to) => agg.filter(r => {
+    if (r.brand !== brand || r.date < from || r.date > to) return false;
+    const isGfa = r.source === 'gfa' || (r.ad_type || '').startsWith('GFA');
+    return channel === 'gfa' ? isGfa : !isGfa;
+  }).map(r => ({ ...r, conv_revenue: r.revenue, _type: channel === 'gfa' ? (r.ad_type || 'GFA') : normType(r.ad_type) }));
+
+  const thisRows = useMemo(() => rowsOf(thisFrom, thisTo), [agg, brand, thisFrom, thisTo, channel]);
+  const prevRows = useMemo(() => rowsOf(prevFrom, prevTo), [agg, brand, prevFrom, prevTo, channel]);
+  const cur = sumM(thisRows), prev = sumM(prevRows);
+
+  // 광고별 상세 (상위/낭비 광고) — 이번 기간 원본만 지연 로딩 (화면은 먼저 뜸)
+  useEffect(() => {
+    let alive = true;
+    setDetailLoading(true);
+    fetchAdDataWindow(thisFrom, thisTo, isAdmin ? null : currentUser.id)
+      .then(rows => { if (alive) { setDetailRows(rows); setDetailLoading(false); } });
+    return () => { alive = false; };
+  }, [thisFrom, thisTo, isAdmin, currentUser]);
+
+  const detailThis = useMemo(() => detailRows.filter(r => {
     const mp = mapByKey[r.match_key];
-    if (!mp || mp.brand !== brand || r.date < from || r.date > to) return false;
+    if (!mp || mp.brand !== brand) return false;
     const isGfa = r.source === 'gfa' || (mp.ad_type || '').startsWith('GFA');
     return channel === 'gfa' ? isGfa : !isGfa;
-  }).map(r => { const mp = mapByKey[r.match_key]; return { ...r, _type: channel === 'gfa' ? (mp.ad_type || 'GFA') : normType(mp.ad_type), _label: mp.label || r.group_name || r.material_id || '-', _product: mp.product }; });
-
-  const thisRows = useMemo(() => rowsOf(thisFrom, thisTo), [adData, mapByKey, brand, thisFrom, thisTo, channel]);
-  const prevRows = useMemo(() => rowsOf(prevFrom, prevTo), [adData, mapByKey, brand, prevFrom, prevTo, channel]);
-  const cur = sumM(thisRows), prev = sumM(prevRows);
+  }).map(r => { const mp = mapByKey[r.match_key]; return { ...r, _type: channel === 'gfa' ? (mp.ad_type || 'GFA') : normType(mp.ad_type), _label: mp.label || r.group_name || r.material_id || '-' }; }), [detailRows, mapByKey, brand, channel]);
 
   const daily = useMemo(() => {
     const by = {};
@@ -294,31 +306,31 @@ export default function Report({ currentUser, allowedBrands }) {
 
   const topAds = useMemo(() => {
     const g = {};
-    thisRows.forEach(r => { const k = r._label + '|' + r._type; (g[k] = g[k] || { label: r._label, type: r._type, rows: [] }).rows.push(r); });
+    detailThis.forEach(r => { const k = r._label + '|' + r._type; (g[k] = g[k] || { label: r._label, type: r._type, rows: [] }).rows.push(r); });
     return Object.values(g).map(x => ({ ...x, m: sumM(x.rows) })).sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 8);
-  }, [thisRows]);
+  }, [detailThis]);
 
   const wasteAds = useMemo(() => {
     const g = {};
-    thisRows.forEach(r => { const k = r._label + '|' + r._type; (g[k] = g[k] || { label: r._label, type: r._type, rows: [] }).rows.push(r); });
+    detailThis.forEach(r => { const k = r._label + '|' + r._type; (g[k] = g[k] || { label: r._label, type: r._type, rows: [] }).rows.push(r); });
     return Object.values(g).map(x => ({ ...x, m: sumM(x.rows) }))
       .filter(x => x.m.cost >= 20000 && x.m.conversions === 0)
       .sort((a, b) => b.m.cost - a.m.cost).slice(0, 6);
-  }, [thisRows]);
+  }, [detailThis]);
 
   // ─── 키워드/매체/시간대 집계 (선택 브랜드) ───
   const kwAgg = useMemo(() => {
     const g = {};
     kwData.forEach(r => { if (acctBase(r.account) !== brand) return; const k = r.keyword || '-'; (g[k] = g[k] || { keyword: k, rows: [] }).rows.push(r); });
     return Object.values(g).map(x => ({ keyword: x.keyword, m: sumD(x.rows) })).filter(x => x.keyword && x.keyword !== '-');
-  }, [kwData, campByBrand, brand]);
+  }, [kwData, brand]);
   const topKw = useMemo(() => kwAgg.slice().sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 10), [kwAgg]);
   const wasteKw = useMemo(() => kwAgg.filter(x => x.m.cost >= 3000 && x.m.conversions === 0).sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
   const deviceRows = useMemo(() => {
     const g = {};
     mediaData.forEach(r => { if (acctBase(r.account) !== brand) return; (g[r.device] = g[r.device] || []).push(r); });
     return ['PC', '모바일'].filter(d => g[d]).map(d => ({ device: d, m: sumD(g[d]) }));
-  }, [mediaData, groupByBrand, brand]);
+  }, [mediaData, brand]);
   const hourAgg = useMemo(() => {
     const rows = hourData.filter(r => { const b = acctBase(r.account); return b && (b === brand || brand.includes(b) || b.includes(brand)); });
     const by = {};
@@ -520,8 +532,9 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 상위 광고 */}
           <Section title="상위 광고 (매출 기준)">
+            {detailLoading ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>광고별 상세를 불러오는 중…</div> :
             <MetricTable head={['광고', '유형', ...STD_HEAD]}
-              rows={topAds.map(a => ({ label: a.label, cells: [{ v: a.type, color: R.sub }, ...stdCells(a.m)] }))} />
+              rows={topAds.map(a => ({ label: a.label, cells: [{ v: a.type, color: R.sub }, ...stdCells(a.m)] }))} />}
           </Section>
 
           {/* 키워드 인사이트 (검색광고만) */}
@@ -602,7 +615,7 @@ export default function Report({ currentUser, allowedBrands }) {
           )}
 
           {/* 낭비 의심 광고 */}
-          {wasteAds.length > 0 && (
+          {!detailLoading && wasteAds.length > 0 && (
             <Section title="낭비 의심 광고 (비용 발생·전환 0)" sub="비용은 나갔지만 이번 기간 전환이 없었던 광고입니다. 소재·키워드·랜딩 점검 또는 예산 재배분 대상입니다.">
               <MetricTable head={['광고', '유형', '노출', '클릭', 'CTR', '광고비', '전환']}
                 rows={wasteAds.map(a => ({ label: a.label, cells: [
