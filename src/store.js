@@ -351,14 +351,9 @@ export function useStore(currentUser) {
     }
     try {
       let adData, mappings;
-      if (isStaff && ownerId) {
-        [adData, mappings] = await Promise.all([
-          fetchAdDataByRangeAndOwner(rangeDays, ownerId),
-          fetchByOwner('mappings', ownerId),
-        ]);
-      } else if (isAdmin || currentUser.role === 'share') {
-        // 관리자 또는 공유 링크(클라이언트) 모드: 전체 로드
-        // 공유 모드는 Dashboard의 allowedBrands로 해당 브랜드만 표시됨
+      if (isAdmin || isStaff || currentUser.role === 'share') {
+        // 전체 데이터 로드 — 직원/공유 모드는 화면에서 allowedBrands(담당 브랜드)로 필터됨.
+        // (수집 데이터는 관리자 소유라, 직원을 소유자 기준으로 격리하면 아무것도 안 보이는 문제가 있었음)
         [adData, mappings] = await Promise.all([
           fetchAdDataByRange(rangeDays),
           fetchAll('mappings'),
@@ -535,6 +530,13 @@ export async function fetchAdDataWindow(fromDate, toDate, ownerId) {
     if (ownerId) q = q.eq('owner_id', ownerId);
     return q;
   });
+}
+
+// 전체 데이터 정확한 건수 (설정 화면 표시용 — 행을 내려받지 않고 개수만 조회)
+export async function countAdData() {
+  if (!sb) return 0;
+  const { count, error } = await sb.from('ad_data').select('id', { count: 'exact', head: true });
+  return error ? 0 : (count || 0);
 }
 
 // 데이터/매핑 변경 알림 → DB가 5분 내 자동 재집계 (즉시 반환, 실패해도 무해)
