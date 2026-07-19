@@ -42,16 +42,16 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
   // 미매핑 항목
   const unmapped = useMemo(() => findUnmappedKeys(adData, mappings), [adData, mappings]);
 
-  // 미매핑: 광고유형별 그룹
-  const unmappedByType = useMemo(() => {
+  // 미매핑: 업체별 그룹 (담당자가 자기 업체를 바로 찾도록)
+  const unmappedByAccount = useMemo(() => {
     const groups = {};
     unmapped.forEach(item => {
-      const type = item.ad_type;
-      if (!groups[type]) groups[type] = [];
-      groups[type].push(item);
+      const acc = item.account || '❓ 업체 미확인 (과거·삭제된 광고)';
+      (groups[acc] = groups[acc] || []).push(item);
     });
-    return groups;
+    return Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
   }, [unmapped]);
+  const accountBrand = (acc) => (acc || '').replace(/_(SA|GFA|통합).*$/, '').replace(/\(.*\)/, '').trim();
 
   // 매핑: 브랜드>제품별 그룹
   const mappedByBrand = useMemo(() => {
@@ -201,22 +201,26 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
             </div>
           </div>
 
-          {Object.entries(unmappedByType).map(([adType, items]) => (
-            <div key={adType} style={{ marginBottom: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  <span style={{ color: AD_TYPE_COLORS[adType] || C.txd }}>{adType}</span>
-                  <span style={{ color: C.txd, fontWeight: 400, marginLeft: 6 }}>{items.length}개</span>
+          {unmappedByAccount.map(([acc, items]) => (
+            <div key={acc} style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '8px 12px' }}>
+                <div style={{ fontSize: 13.5, fontWeight: 800 }}>
+                  🏢 <span style={{ color: C.cyan }}>{acc}</span>
+                  <span style={{ color: C.txd, fontWeight: 400, marginLeft: 8 }}>{items.length}개 미매핑</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  {/* 광고유형별 전체 매핑 버튼 */}
-                  {brand && product && (
-                    <button onClick={() => handleMapByType(items)} style={{ ...btn, background: C.warn, fontSize: 11, padding: '4px 10px' }}>
-                      전체 "{product}"로 매핑
+                  {true && (
+                    <button onClick={() => { setBrand(accountBrand(acc)); setProduct('전체'); }}
+                      style={{ ...btn, fontSize: 11, padding: '4px 10px' }}>
+                      브랜드명 자동입력
                     </button>
                   )}
-                  {/* 광고유형별 전체 삭제 버튼 */}
-                  <button onClick={() => handleDeleteUnmappedByType(items, adType)} style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '3px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
+                  {brand && product && (
+                    <button onClick={() => handleMapByType(items)} style={{ ...btn, background: C.warn, fontSize: 11, padding: '4px 10px' }}>
+                      이 업체 전체 → "{brand}/{product}"
+                    </button>
+                  )}
+                  <button onClick={() => handleDeleteUnmappedByType(items, acc)} style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '3px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
                     전체 삭제
                   </button>
                 </div>
@@ -229,7 +233,10 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                     padding: '10px 14px', borderBottom: `1px solid ${C.bd}`,
                   }}>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{item.group_name || item.material_id || '-'}</div>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>
+                        <span style={{ color: AD_TYPE_COLORS[item.ad_type] || C.txd, fontSize: 11, marginRight: 6 }}>[{item.ad_type}]</span>
+                        {item.group_name || item.material_id || '-'}
+                      </div>
                       <div style={{ fontSize: 11, color: C.txd, marginTop: 2 }}>
                         캠페인: {item.campaign_name}
                         {item.group_id && <span> · ID: {item.group_id}</span>}
