@@ -528,7 +528,7 @@ function TeamCalendar({ users, currentUser, isAdmin }) {
     await resolveEvent(ev.id, memo, currentUser.name); load();
   };
 
-  const cellH = 92;
+  const cellH = 150;   // 셀 확대 (기존 92)
   const monthLabel = `${ym.y}년 ${ym.m + 1}월`;
   const move = (n) => setYm(({ y, m }) => { const d = new Date(y, m + n, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
 
@@ -544,34 +544,44 @@ function TeamCalendar({ users, currentUser, isAdmin }) {
             <button style={btn} onClick={() => { const d = new Date(); setYm({ y: d.getFullYear(), m: d.getMonth() }); setSelDay(todayStr()); }}>오늘</button>
           </div>
         }>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-          {ETYPES.map(t => <span key={t.k} style={{ fontSize: 12, color: C.txd }}><span style={{ color: t.color }}>●</span> {t.icon} {t.label}</span>)}
-          <span style={{ fontSize: 12, color: C.txd }}>✍ 일일보고 · 📋 회의록</span>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+          {ETYPES.map(t => <span key={t.k} style={{ fontSize: 13, color: C.txd }}><span style={{ color: t.color }}>●</span> {t.icon} {t.label}</span>)}
+          <span style={{ fontSize: 13, color: C.txd }}>✍ 일일보고 · 📋 회의록</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-          {WDAY.map((w, i) => <div key={w} style={{ textAlign: 'center', fontSize: 12, fontWeight: 700, color: i === 0 ? C.no : i === 6 ? C.ac : C.txd, padding: '4px 0' }}>{w}</div>)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+          {WDAY.map((w, i) => <div key={w} style={{ textAlign: 'center', fontSize: 13.5, fontWeight: 700, color: i === 0 ? C.no : i === 6 ? C.ac : C.txd, padding: '5px 0' }}>{w}</div>)}
           {grid.map(({ dstr, inMonth, dow }) => {
             const evs = dayEvents(dstr); const isToday = dstr === todayStr(); const isSel = dstr === selDay;
             const rc = dayReportCnt(dstr); const ms = dayMeetings(dstr);
+            // 같은 종류·같은 대상(브랜드/이름)은 한 줄로 합치기 (×N 표기)
+            const chips = [];
+            const seen = new Map();
+            evs.forEach(e => {
+              const t = etypeOf(e.etype);
+              const lb = e.etype === 'perf' ? (e.brand || '성과') : e.etype === 'promise' ? (e.brand || '약속') : (e.owner_name || e.title);
+              const key = e.etype + '|' + lb;
+              if (seen.has(key)) { seen.get(key).n += 1; }
+              else { const c = { key, t, lb, n: 1 }; seen.set(key, c); chips.push(c); }
+            });
+            const MAXC = 5;
             return (
               <div key={dstr} onClick={() => setSelDay(dstr)}
-                style={{ minHeight: cellH, background: isSel ? 'rgba(91,141,239,0.14)' : C.sf2, borderRadius: 8, padding: 5, cursor: 'pointer',
+                style={{ minHeight: cellH, background: isSel ? 'rgba(91,141,239,0.14)' : C.sf2, borderRadius: 9, padding: 7, cursor: 'pointer',
                   border: `1.5px solid ${isSel ? C.ac : isToday ? 'rgba(91,141,239,0.55)' : C.bd}`, opacity: inMonth ? 1 : 0.38 }}>
-                <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 600, color: dow === 0 ? C.no : dow === 6 ? C.ac : C.tx, marginBottom: 3 }}>
-                  {+dstr.slice(8)}{isToday && <span style={{ fontSize: 10, color: C.ac, marginLeft: 3 }}>오늘</span>}
-                  <span style={{ float: 'right', fontSize: 10 }}>
+                <div style={{ fontSize: 13.5, fontWeight: isToday ? 800 : 600, color: dow === 0 ? C.no : dow === 6 ? C.ac : C.tx, marginBottom: 5 }}>
+                  {+dstr.slice(8)}{isToday && <span style={{ fontSize: 11, color: C.ac, marginLeft: 4 }}>오늘</span>}
+                  <span style={{ float: 'right', fontSize: 11.5 }}>
                     {rc > 0 && <span style={{ color: C.ok }}>✍{rc}</span>}
-                    {ms.length > 0 && <span style={{ marginLeft: 3 }}>📋</span>}
+                    {ms.length > 0 && <span style={{ marginLeft: 4 }}>📋</span>}
                   </span>
                 </div>
-                {evs.slice(0, 3).map(e => {
-                  const t = etypeOf(e.etype);
-                  return <div key={e.id} style={{ fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    background: t.color + '22', color: t.color, borderRadius: 4, padding: '1px 4px', marginBottom: 2 }}>
-                    {t.icon} {e.etype === 'perf' ? (e.brand || '성과') : e.etype === 'promise' ? (e.brand || '약속') : (e.owner_name || e.title)}
-                  </div>;
-                })}
-                {evs.length > 3 && <div style={{ fontSize: 10, color: C.txd }}>+{evs.length - 3}건 더</div>}
+                {chips.slice(0, MAXC).map(c => (
+                  <div key={c.key} style={{ fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    background: c.t.color + '22', color: c.t.color, borderRadius: 5, padding: '2px 6px', marginBottom: 3 }}>
+                    {c.t.icon} {c.lb}{c.n > 1 && <b style={{ marginLeft: 3, opacity: 0.85 }}>×{c.n}</b>}
+                  </div>
+                ))}
+                {chips.length > MAXC && <div style={{ fontSize: 11.5, color: C.txd }}>+{chips.length - MAXC}건 더</div>}
               </div>
             );
           })}
