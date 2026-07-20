@@ -427,17 +427,18 @@ export function useStore(currentUser) {
     return false;
   }, [ownerId]);
 
-  // 매핑 삭제 (owner-aware)
+  // 매핑 삭제 — 매핑은 회사 공용 자산이라 소유자 무관하게 삭제 (2026-07-20)
+  // (직원 화면에도 전체 미매핑/매핑이 보이므로, 잘못 단 매핑을 누구든 고칠 수 있어야 함)
   const removeMapping = useCallback(async (matchKey) => {
-    if (await deleteMappingByKey(matchKey, ownerId)) {
+    if (await deleteMappingByKey(matchKey, null)) {
       setData(prev => ({
         ...prev,
-        mappings: prev.mappings.filter(m => !(m.match_key === matchKey && (m.owner_id === ownerId || (!m.owner_id && !ownerId)))),
+        mappings: prev.mappings.filter(m => m.match_key !== matchKey),
       }));
       return true;
     }
     return false;
-  }, [ownerId]);
+  }, []);
 
   // 브랜드 전체 삭제 (매핑 일괄 삭제 → 브랜드 버튼이 사라짐)
   const removeBrand = useCallback(async (brand) => {
