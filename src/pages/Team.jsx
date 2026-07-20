@@ -46,19 +46,73 @@ function Section({ title, sub, right, children }) {
   );
 }
 
+// ─── 사진 첨부 공용 (일일보고·회의록에서 사용, 여러 장 가능) ───
+function AttachThumbs({ atts, onRemove }) {
+  if (!atts || atts.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+      {atts.map((a, i) => (
+        <div key={i} style={{ position: 'relative' }}>
+          <img src={a.url} alt={a.name} title={a.name}
+            style={{ height: 64, borderRadius: 6, cursor: 'pointer', border: `1px solid ${C.bd}` }}
+            onClick={() => window.open(a.url, '_blank')} />
+          {onRemove && (
+            <span onClick={() => onRemove(i)} title="사진 삭제 (저장해야 반영)"
+              style={{ position: 'absolute', top: -6, right: -6, background: C.no, color: '#fff', borderRadius: '50%',
+                width: 18, height: 18, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', fontWeight: 800 }}>✕</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PhotoInput({ files, setFiles }) {
+  return (
+    <div>
+      <div style={label}>📷 사진 첨부 (여러 장 가능 — 자동으로 용량을 줄여 저장합니다)</div>
+      <input type="file" accept="image/*" multiple style={{ fontSize: 13, color: C.txd }}
+        onChange={e => { const add = Array.from(e.target.files || []); if (add.length) setFiles(prev => [...prev, ...add]); e.target.value = ''; }} />
+      {files.length > 0 && (
+        <span style={{ fontSize: 12, color: C.ok, marginLeft: 8 }}>
+          {files.length}장 선택됨
+          <span style={{ color: C.no, cursor: 'pointer', marginLeft: 8 }} onClick={() => setFiles([])}>비우기</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// 선택된 파일들을 압축 → 업로드 → 첨부 목록 반환
+async function uploadFiles(files) {
+  const atts = [];
+  for (const f of files) {
+    const blob = await compressImage(f);
+    const up = await uploadAttachment(blob, f.name);
+    if (up) atts.push(up); else alert(`사진 업로드 실패: ${f.name}`);
+  }
+  return atts;
+}
+
 // ══════════════ 일일보고: 내 보고 작성 (직원+대표 공용) ══════════════
 function MyDaily({ currentUser, onSaved }) {
   const [form, setForm] = useState({ done: '', tomorrow: '', blocker: '' });
   const [history, setHistory] = useState([]);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [files, setFiles] = useState([]);           // 새로 선택한 사진들
+  const [existingAtts, setExistingAtts] = useState([]);  // 오늘 보고에 이미 저장된 사진들
   const td = todayStr();
 
   const load = useCallback(async () => {
     const list = await fetchMyReports(currentUser.id, 14);
     setHistory(list);
     const todayR = list.find(r => r.report_date === td);
-    if (todayR) setForm({ done: todayR.done || '', tomorrow: todayR.tomorrow || '', blocker: todayR.blocker || '' });
+    if (todayR) {
+      setForm({ done: todayR.done || '', tomorrow: todayR.tomorrow || '', blocker: todayR.blocker || '' });
+      setExistingAtts(todayR.attachments || []);
+    }
   }, [currentUser.id]);
   useEffect(() => { load(); }, [load]);
 
@@ -67,9 +121,14 @@ function MyDaily({ currentUser, onSaved }) {
   const save = async () => {
     if (!form.done.trim() && !form.tomorrow.trim()) { alert('오늘 한 일 또는 내일 최우선 중 하나는 적어주세요.'); return; }
     setSaving(true);
-    const r = await upsertDailyReport({ owner_id: currentUser.id, staff_name: currentUser.name, report_date: td, ...form });
+    const newAtts = await uploadFiles(files);
+    const atts = [...existingAtts, ...newAtts];
+    const r = await upsertDailyReport({ owner_id: currentUser.id, staff_name: currentUser.name, report_date: td, ...form, attachments: atts });
     setSaving(false);
-    if (r.ok) { setSavedMsg(submitted ? '수정되었습니다 ✓' : '제출되었습니다 ✓'); setTimeout(() => setSavedMsg(''), 2500); load(); onSaved && onSaved(); }
+    if (r.ok) {
+      setFiles([]); setExistingAtts(atts);
+      setSavedMsg(submitted ? '수정되었습니다 ✓' : '제출되었습니다 ✓'); setTimeout(() => setSavedMsg(''), 2500); load(); onSaved && onSaved();
+    }
     else alert('저장 실패: ' + r.msg);
   };
 
@@ -87,6 +146,10 @@ function MyDaily({ currentUser, onSaved }) {
             <textarea style={{ ...ta, minHeight: 44 }} value={form.tomorrow} placeholder="예) 천비누솝 신규 캠페인 세팅 완료" onChange={e => setForm(f => ({ ...f, tomorrow: e.target.value }))} /></div>
           <div><div style={label}>③ 막힌 것 · 도움 필요한 것 (없으면 비워두세요)</div>
             <textarea style={{ ...ta, minHeight: 44 }} value={form.blocker} placeholder="예) GFA 소재 시안 컨펌 대기중 — 대표님 확인 부탁드립니다" onChange={e => setForm(f => ({ ...f, blocker: e.target.value }))} /></div>
+          <div>
+            <PhotoInput files={files} setFiles={setFiles} />
+            <AttachThumbs atts={existingAtts} onRemove={i => setExistingAtts(a => a.filter((_, j) => j !== i))} />
+          </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button style={btnAc} disabled={saving} onClick={save}>{saving ? '저장 중…' : submitted ? '수정 저장' : '제출하기'}</button>
             {savedMsg && <span style={{ color: C.ok, fontSize: 13, fontWeight: 700 }}>{savedMsg}</span>}
@@ -102,6 +165,7 @@ function MyDaily({ currentUser, onSaved }) {
               {r.done && <div style={{ fontSize: 13, marginBottom: 2 }}>✅ {r.done}</div>}
               {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 2 }}>▶ 내일: {r.tomorrow}</div>}
               {r.blocker && <div style={{ fontSize: 13, color: C.warn, marginBottom: 2 }}>⚠ {r.blocker}</div>}
+              <AttachThumbs atts={r.attachments} />
               {r.ceo_comment && <div style={{ fontSize: 13, color: C.yel, background: 'rgba(240,199,70,0.08)', borderRadius: 8, padding: '6px 10px', marginTop: 6 }}>💬 대표: {r.ceo_comment}</div>}
             </div>
           ))}
@@ -163,6 +227,7 @@ function DailyAdmin({ users, currentUser }) {
                     {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 4 }}>▶ 내일: {r.tomorrow}</div>}
                     {r.blocker ? <div style={{ fontSize: 13, color: C.warn, marginBottom: 4 }}>⚠ {r.blocker}</div>
                       : <div style={{ fontSize: 12, color: C.txm, marginBottom: 4 }}>막힌 것 없음</div>}
+                    <AttachThumbs atts={r.attachments} />
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                       <input style={{ ...inp, fontSize: 12.5 }} placeholder="한 줄 코멘트 (직원에게 표시)" value={comments[r.id] || ''}
                         onChange={e => setComments(c => ({ ...c, [r.id]: e.target.value }))}
@@ -230,6 +295,10 @@ function MeetingsView({ users, currentUser, isAdmin }) {
   const [editNotes, setEditNotes] = useState(''); const [editTitle, setEditTitle] = useState('');
   const [creating, setCreating] = useState(false);
   const [newM, setNewM] = useState({ meeting_date: todayStr(), title: '', notes: '' });
+  const [newFiles, setNewFiles] = useState([]);        // 새 회의록 사진
+  const [editAtts, setEditAtts] = useState([]);        // 선택된 회의의 기존 사진
+  const [addFiles, setAddFiles] = useState([]);        // 선택된 회의에 추가할 사진
+  const [busy, setBusy] = useState(false);
 
   const loadAll = useCallback(async () => {
     const [ms, oa] = await Promise.all([fetchMeetings(30), fetchOpenActions()]);
@@ -244,17 +313,24 @@ function MeetingsView({ users, currentUser, isAdmin }) {
   useEffect(() => { loadSel(sel); }, [sel, loadSel]);
 
   const selM = meetings.find(m => m.id === sel);
-  useEffect(() => { if (selM) { setEditNotes(selM.notes || ''); setEditTitle(selM.title || ''); } }, [sel]);
+  useEffect(() => { if (selM) { setEditNotes(selM.notes || ''); setEditTitle(selM.title || ''); setEditAtts(selM.attachments || []); setAddFiles([]); } }, [sel]);
 
   const createMeeting = async () => {
     if (!newM.title.trim() && !newM.notes.trim()) { alert('제목이나 내용을 입력하세요.'); return; }
-    const r = await addMeeting({ ...newM, created_by: currentUser.name });
-    if (r.ok) { setCreating(false); setNewM({ meeting_date: todayStr(), title: '', notes: '' }); await loadAll(); setSel(r.meeting.id); }
+    setBusy(true);
+    const atts = await uploadFiles(newFiles);
+    const r = await addMeeting({ ...newM, created_by: currentUser.name, attachments: atts });
+    setBusy(false);
+    if (r.ok) { setCreating(false); setNewM({ meeting_date: todayStr(), title: '', notes: '' }); setNewFiles([]); await loadAll(); setSel(r.meeting.id); }
     else alert('생성 실패: ' + r.msg);
   };
   const saveMeeting = async () => {
-    const ok = await updateMeeting(sel, { title: editTitle, notes: editNotes });
-    if (ok) { loadAll(); alert('저장되었습니다.'); } else alert('저장 실패');
+    setBusy(true);
+    const newAtts = await uploadFiles(addFiles);
+    const merged = [...editAtts, ...newAtts];
+    const ok = await updateMeeting(sel, { title: editTitle, notes: editNotes, attachments: merged });
+    setBusy(false);
+    if (ok) { setEditAtts(merged); setAddFiles([]); loadAll(); alert('저장되었습니다.'); } else alert('저장 실패');
   };
   const removeMeeting = async () => {
     if (!confirm('회의록과 소속 액션아이템이 함께 삭제됩니다. 삭제할까요?')) return;
@@ -284,7 +360,8 @@ function MeetingsView({ users, currentUser, isAdmin }) {
               <input style={inp} placeholder="회의 제목 (예: 주간 성과 회의)" value={newM.title} onChange={e => setNewM(m => ({ ...m, title: e.target.value }))} />
             </div>
             <textarea style={{ ...ta, minHeight: 100 }} placeholder={"논의 내용을 적으세요.\n결정된 할 일은 저장 후 아래 '액션아이템'에 담당자·기한과 함께 추가하세요."} value={newM.notes} onChange={e => setNewM(m => ({ ...m, notes: e.target.value }))} />
-            <div style={{ marginTop: 8 }}><button style={btnAc} onClick={createMeeting}>회의록 저장</button></div>
+            <div style={{ marginTop: 8 }}><PhotoInput files={newFiles} setFiles={setNewFiles} /></div>
+            <div style={{ marginTop: 8 }}><button style={btnAc} disabled={busy} onClick={createMeeting}>{busy ? '사진 올리는 중…' : '회의록 저장'}</button></div>
           </div>
         )}
         {meetings.length === 0 && !creating ? <div style={{ color: C.txd, fontSize: 13 }}>회의록이 없습니다. '+ 새 회의록'으로 시작하세요.</div> :
@@ -295,6 +372,7 @@ function MeetingsView({ users, currentUser, isAdmin }) {
                   <span style={{ fontWeight: 800, color: C.cyan }}>{kdw(m.meeting_date)}</span>
                   <span style={{ marginLeft: 10, fontWeight: 700 }}>{m.title || '(제목 없음)'}</span>
                   <span style={{ marginLeft: 8, fontSize: 12, color: C.txm }}>{m.created_by}</span>
+                  {(m.attachments || []).length > 0 && <span style={{ marginLeft: 8, fontSize: 12, color: C.txd }}>📷{m.attachments.length}</span>}
                 </div>
                 <span style={{ color: C.txd }}>{sel === m.id ? '▲' : '▼'}</span>
               </div>
@@ -302,8 +380,12 @@ function MeetingsView({ users, currentUser, isAdmin }) {
                 <div style={{ background: C.sf2, borderRadius: 10, padding: 14, marginBottom: 10 }}>
                   <input style={{ ...inp, fontWeight: 700, marginBottom: 8 }} value={editTitle} onChange={e => setEditTitle(e.target.value)} />
                   <textarea style={{ ...ta, minHeight: 120 }} value={editNotes} onChange={e => setEditNotes(e.target.value)} />
+                  <div style={{ marginTop: 8 }}>
+                    <PhotoInput files={addFiles} setFiles={setAddFiles} />
+                    <AttachThumbs atts={editAtts} onRemove={i => setEditAtts(a => a.filter((_, j) => j !== i))} />
+                  </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button style={btnAc} onClick={saveMeeting}>내용 저장</button>
+                    <button style={btnAc} disabled={busy} onClick={saveMeeting}>{busy ? '사진 올리는 중…' : '내용 저장'}</button>
                     {isAdmin && <button style={{ ...btn, color: C.no }} onClick={removeMeeting}>회의록 삭제</button>}
                   </div>
                   <div style={{ marginTop: 14, fontSize: 13, fontWeight: 800 }}>📋 이 회의의 액션아이템</div>
