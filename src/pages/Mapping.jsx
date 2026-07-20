@@ -59,6 +59,19 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
     return groups;
   }, [mappings]);
 
+  // ─── 응답없음 방지 (2026-07-20): 수만 개를 한 번에 그리지 않는다 ───
+  // 매핑 현황은 브랜드를 접어두고(클릭 시 펼침), 긴 목록은 '더 보기'로 나눠서 표시
+  const [openBrands, setOpenBrands] = useState({});      // 브랜드별 펼침 여부
+  const [rowLimits, setRowLimits] = useState({});        // 그룹별 표시 개수
+  const UNMAPPED_STEP = 50, MAPPED_STEP = 100;
+  const limitOf = (key, def) => rowLimits[key] || def;
+  const moreRows = (key, step) => setRowLimits(s => ({ ...s, [key]: (s[key] || step) + step }));
+  const MoreBar = ({ shown, total, onMore }) => (shown < total ? (
+    <div onClick={onMore} style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, color: C.ac, cursor: 'pointer', background: C.sf2 }}>
+      더 보기 ({shown}/{total}개 표시 중)
+    </div>
+  ) : null);
+
   // ─── 개별 매핑 ───
   const handleMap = async (item) => {
     if (!brand.trim()) return alert('브랜드명을 입력해주세요');
@@ -226,7 +239,7 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
               </div>
 
               <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, overflow: 'hidden' }}>
-                {items.map(item => (
+                {items.slice(0, limitOf('u_' + acc, UNMAPPED_STEP)).map(item => (
                   <div key={item.match_key} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     padding: '10px 14px', borderBottom: `1px solid ${C.bd}`,
@@ -251,6 +264,8 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                     </div>
                   </div>
                 ))}
+                <MoreBar shown={Math.min(items.length, limitOf('u_' + acc, UNMAPPED_STEP))} total={items.length}
+                  onMore={() => moreRows('u_' + acc, UNMAPPED_STEP)} />
               </div>
             </div>
           ))}
@@ -280,19 +295,25 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
             )}
           </div>
 
-          {Object.entries(mappedByBrand).sort().map(([brandName, products]) => (
-            <div key={brandName} style={{ marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          {Object.entries(mappedByBrand).sort().map(([brandName, products]) => {
+            const total = Object.values(products).flat().length;
+            const isOpen = !!openBrands[brandName];
+            return (
+            <div key={brandName} style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, cursor: 'pointer' }}
+                onClick={() => setOpenBrands(s => ({ ...s, [brandName]: !s[brandName] }))}>
+                <span style={{ color: C.txd, fontSize: 12 }}>{isOpen ? '▼' : '▶'}</span>
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.ac }}>{brandName}</div>
-                {isAdmin && (
-                  <button onClick={() => handleDeleteBrand(brandName, Object.values(products).flat().length)}
-                    style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '2px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
+                <span style={{ fontSize: 12, color: C.txd }}>{total}개 매핑</span>
+                {isAdmin && isOpen && (
+                  <button onClick={e => { e.stopPropagation(); handleDeleteBrand(brandName, total); }}
+                    style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '2px 8px', color: C.no, cursor: 'pointer', fontSize: 10, marginLeft: 'auto' }}>
                     브랜드 삭제
                   </button>
                 )}
               </div>
 
-              {Object.entries(products).sort().map(([productName, items]) => {
+              {isOpen && Object.entries(products).sort().map(([productName, items]) => {
                 // 광고유형별 그룹핑
                 const byAdType = {};
                 items.forEach(m => {
@@ -324,8 +345,8 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                               </button>
                             )}
                           </div>
-                          {/* 개별 항목 */}
-                          {adTypeItems.map(m => (
+                          {/* 개별 항목 (더 보기로 나눠 표시 — 응답없음 방지) */}
+                          {adTypeItems.slice(0, limitOf('m_' + brandName + '|' + productName + '|' + adType, MAPPED_STEP)).map(m => (
                             <div key={m.match_key} style={{
                               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                               padding: '7px 12px', borderBottom: `1px solid ${C.bd}`, fontSize: 12,
@@ -339,6 +360,8 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                               </button>
                             </div>
                           ))}
+                          <MoreBar shown={Math.min(adTypeItems.length, limitOf('m_' + brandName + '|' + productName + '|' + adType, MAPPED_STEP))}
+                            total={adTypeItems.length} onMore={() => moreRows('m_' + brandName + '|' + productName + '|' + adType, MAPPED_STEP)} />
                         </React.Fragment>
                       ))}
                     </div>
@@ -346,7 +369,7 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                 );
               })}
             </div>
-          ))}
+          );})}
         </div>
       )}
     </div>
