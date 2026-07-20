@@ -390,6 +390,18 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
         </div>
       </div>
 
+      {/* 색상 범례 — 대화 분석이 남긴 메모의 종류별 색 */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12.5, color: C.txd, background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '7px 12px' }}>
+        <b style={{ color: C.tx, fontSize: 12 }}>색상 의미:</b>
+        <span><span style={{ color: C.ok }}>●</span> 통화 <span style={{ color: C.txm }}>(먼저 전화한 날 — 최고평가)</span></span>
+        <span><span style={{ color: C.cyan }}>●</span> 제안 <span style={{ color: C.txm }}>(개선안 제시)</span></span>
+        <span><span style={{ color: C.ac }}>●</span> 질문 <span style={{ color: C.txm }}>(의견을 물음)</span></span>
+        <span><span style={{ color: C.pur }}>●</span> 요청 <span style={{ color: C.txm }}>(광고주가 요청)</span></span>
+        <span><span style={{ color: C.txd }}>●</span> 보고 <span style={{ color: C.txm }}>(수치 전달만)</span></span>
+        <span><span style={{ color: C.yel }}>●</span> 주의·기타 <span style={{ color: C.txm }}>(오래 침묵 등)</span></span>
+        <span><span style={{ color: C.no }}>●</span> 미흡·경고 <span style={{ color: C.txm }}>(문제 신호 — 확인 필요)</span></span>
+      </div>
+
       {/* 요일 헤더 + 날짜 칸 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3 }}>
         {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
