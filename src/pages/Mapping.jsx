@@ -15,19 +15,13 @@ import { labelFromMatchKey } from '../config';
 export default function Mapping({ data, addMapping, removeMapping, removeBrand, deleteAdDataByKeys, currentUser }) {
   const { adData: allAdData, mappings: allMappings } = data;
 
-  // ─── 데이터 격리: 현재 사용자의 데이터만 사용 ───
-  const myOwnerId = currentUser?.id;
-  const adData = useMemo(() => {
-    if (!myOwnerId) return allAdData;
-    // 정확히 내 소유 데이터만 (NULL 제외)
-    return allAdData.filter(d => d.owner_id === myOwnerId);
-  }, [allAdData, myOwnerId]);
-
-  const mappings = useMemo(() => {
-    if (!myOwnerId) return allMappings;
-    // 정확히 내 소유 매핑만 (NULL 제외)
-    return allMappings.filter(m => m.owner_id === myOwnerId);
-  }, [allMappings, myOwnerId]);
+  // ─── 데이터: 회사 전체 공유 (2026-07-20 변경) ───
+  // 수집 데이터가 관리자 소유라서 소유자 기준으로 격리하면 직원에게 미매핑이 전혀 안 보였음.
+  // 매핑은 회사 공용 자산 — 전 직원이 같은 미매핑 목록을 보고 함께 매핑한다.
+  // (삭제류 버튼은 관리자 전용으로 제한)
+  const adData = allAdData;
+  const mappings = allMappings;
+  const isAdmin = currentUser?.role === 'admin';
 
   const [brand, setBrand] = useState('');
   const [product, setProduct] = useState('');
@@ -195,10 +189,12 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                   미매핑 전체 "{product}"로 매핑
                 </button>
               )}
-              {/* 미매핑 전체 삭제 버튼 */}
-              <button onClick={handleDeleteUnmappedAll} style={btnDanger}>
-                미매핑 전체 삭제
-              </button>
+              {/* 미매핑 전체 삭제 버튼 (관리자 전용) */}
+              {isAdmin && (
+                <button onClick={handleDeleteUnmappedAll} style={btnDanger}>
+                  미매핑 전체 삭제
+                </button>
+              )}
             </div>
           </div>
 
@@ -221,9 +217,11 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                       이 업체 전체 → "{brand}/{product}"
                     </button>
                   )}
-                  <button onClick={() => handleDeleteUnmappedByType(items, acc)} style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '3px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
-                    전체 삭제
-                  </button>
+                  {isAdmin && (
+                    <button onClick={() => handleDeleteUnmappedByType(items, acc)} style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '3px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
+                      전체 삭제
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -249,7 +247,7 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
                       ) : (
                         <span style={{ fontSize: 11, color: C.txm }}>브랜드/제품을 먼저 입력하세요</span>
                       )}
-                      <button onClick={() => handleDeleteUnmappedItem(item)} style={{ background: 'none', border: 'none', color: C.no, cursor: 'pointer', fontSize: 13, padding: 2 }}>✕</button>
+                      {isAdmin && <button onClick={() => handleDeleteUnmappedItem(item)} style={{ background: 'none', border: 'none', color: C.no, cursor: 'pointer', fontSize: 13, padding: 2 }}>✕</button>}
                     </div>
                   </div>
                 ))}
@@ -274,20 +272,24 @@ export default function Mapping({ data, addMapping, removeMapping, removeBrand, 
             <div style={{ fontSize: 15, fontWeight: 600 }}>
               📋 매핑 현황 ({mappings.length}개)
             </div>
-            {/* 매핑 전체 삭제 버튼 */}
-            <button onClick={handleDeleteAll} style={btnDanger}>
-              매핑 전체 삭제
-            </button>
+            {/* 매핑 전체 삭제 버튼 (관리자 전용) */}
+            {isAdmin && (
+              <button onClick={handleDeleteAll} style={btnDanger}>
+                매핑 전체 삭제
+              </button>
+            )}
           </div>
 
           {Object.entries(mappedByBrand).sort().map(([brandName, products]) => (
             <div key={brandName} style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.ac }}>{brandName}</div>
-                <button onClick={() => handleDeleteBrand(brandName, Object.values(products).flat().length)}
-                  style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '2px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
-                  브랜드 삭제
-                </button>
+                {isAdmin && (
+                  <button onClick={() => handleDeleteBrand(brandName, Object.values(products).flat().length)}
+                    style={{ background: 'none', border: `1px solid ${C.no}33`, borderRadius: 4, padding: '2px 8px', color: C.no, cursor: 'pointer', fontSize: 10 }}>
+                    브랜드 삭제
+                  </button>
+                )}
               </div>
 
               {Object.entries(products).sort().map(([productName, items]) => {
