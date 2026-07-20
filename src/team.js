@@ -40,12 +40,13 @@ export async function fetchReportsRange(fromDate, toDate) {
 }
 
 // 작성/수정 (하루 1건 upsert — ceo_comment는 건드리지 않음)
-export async function upsertDailyReport({ owner_id, staff_name, report_date, done, tomorrow, blocker }) {
+export async function upsertDailyReport({ owner_id, staff_name, report_date, done, tomorrow, blocker, attachments }) {
   if (!sb || !owner_id || !report_date) return { ok: false, msg: '필수값 누락' };
   const row = {
     id: owner_id + '_' + report_date,   // 결정적 id → 중복 원천 차단
     owner_id, staff_name: staff_name || '',
     report_date, done: done || '', tomorrow: tomorrow || '', blocker: blocker || '',
+    attachments: attachments || [],
     updated_at: new Date().toISOString(),
   };
   const { error } = await sb.from('daily_reports').upsert(row, { onConflict: 'id' });
@@ -72,20 +73,21 @@ export async function fetchMeetings(limit = 30) {
   return data || [];
 }
 
-export async function addMeeting({ meeting_date, title, notes, created_by }) {
+export async function addMeeting({ meeting_date, title, notes, created_by, attachments }) {
   if (!sb || !meeting_date) return { ok: false, msg: '날짜는 필수입니다' };
-  const row = { id: uid(), meeting_date, title: title || '', notes: notes || '', created_by: created_by || '' };
+  const row = { id: uid(), meeting_date, title: title || '', notes: notes || '', created_by: created_by || '', attachments: attachments || [] };
   const { data, error } = await sb.from('meetings').insert(row).select().single();
   if (error) return { ok: false, msg: error.message };
   return { ok: true, meeting: data };
 }
 
-export async function updateMeeting(id, { title, notes, meeting_date }) {
+export async function updateMeeting(id, { title, notes, meeting_date, attachments }) {
   if (!sb || !id) return false;
   const upd = { updated_at: new Date().toISOString() };
   if (title !== undefined) upd.title = title;
   if (notes !== undefined) upd.notes = notes;
   if (meeting_date !== undefined) upd.meeting_date = meeting_date;
+  if (attachments !== undefined) upd.attachments = attachments;
   const { error } = await sb.from('meetings').update(upd).eq('id', id);
   return !error;
 }
