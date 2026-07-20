@@ -26,7 +26,7 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
       {mobile && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 50, background: C.sf, borderBottom: `1px solid ${C.bd}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', zIndex: 20 }}>
           <button onClick={() => setMenu(!menuOpen)} style={{ background: 'none', border: 'none', color: C.tx, fontSize: 20, cursor: 'pointer' }}>{menuOpen ? '✕' : '☰'}</button>
-          <span style={{ fontSize: 14, fontWeight: 700, color: C.ac }}>오름히 광고대시보드</span>
+          <img src="/logo.png" alt="오름히 운영시스템" style={{ height: 22, display: 'block' }} />
           <div style={{ width: 28 }} />
         </div>
       )}
@@ -37,8 +37,8 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
       {/* 사이드바 */}
       <div style={{ width: 200, background: C.sf, borderRight: `1px solid ${C.bd}`, position: 'fixed', top: 0, left: mobile ? (menuOpen ? 0 : -200) : 0, bottom: 0, display: 'flex', flexDirection: 'column', zIndex: 30, transition: mobile ? 'left 0.25s' : 'none' }}>
         <div style={{ padding: '18px 14px 12px', borderBottom: `1px solid ${C.bd}` }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.ac }}>주식회사 오름히</div>
-          <div style={{ fontSize: 10, color: C.txd, marginTop: 2 }}>광고 성과 대시보드</div>
+          <img src="/logo.png" alt="오름히" style={{ height: 30, display: 'block' }} />
+          <div style={{ fontSize: 10, color: C.txd, marginTop: 6 }}>오름히 운영시스템</div>
         </div>
 
         {/* 탭 메뉴 */}
