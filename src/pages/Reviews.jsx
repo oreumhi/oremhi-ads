@@ -132,12 +132,13 @@ export default function Reviews({ currentUser }) {
   const [newStore, setNewStore] = useState('');
 
   const loadBase = useCallback(async () => {
-    const [ds, al, prods] = await Promise.all([fetchReviewDates(null), fetchReviewAliases(), fetchReviewProducts()]);
+    const [ds, al, prods, sm] = await Promise.all([fetchReviewDates(null), fetchReviewAliases(), fetchReviewProducts(), fetchReviewStoreMap()]);
     setDates(ds); setDate(prev => prev || ds[0] || ''); setAlias(al); setProducts(prods);
+    // 매장-담당자 목록은 직원 화면에서도 필요 (본인 담당 매장 필터에 사용)
+    setStoreMap(Object.fromEntries(sm.map(m => [m.store, m.owner_id])));
     if (isAdmin) {
-      const [users, sm] = await Promise.all([fetchUsers(), fetchReviewStoreMap()]);
+      const users = await fetchUsers();
       setStaff(users.filter(u => u.role === 'staff'));
-      setStoreMap(Object.fromEntries(sm.map(m => [m.store, m.owner_id])));
     }
     setLoading(false);
   }, [isAdmin]);
