@@ -541,7 +541,7 @@ export async function fetchAdDataWindow(fromDate, toDate, ownerId) {
 // ═══════════════════════════════════════════
 export async function syncStaffAssignments() {
   if (!sb) return { rank: 0, review: 0, chat: 0 };
-  const norm = (s) => (s || '').toLowerCase().replace(/[\s_\-·xX×()]/g, '');
+  const norm = (s) => (s || '').toLowerCase().replace(/[\s_\-·xX×()]/g, '').replace(/숍/g, '솝');
   const { data: users } = await sb.from('users').select('id,name,role,assigned_brands');
   const pairs = [];
   (users || []).filter(u => u.role === 'staff').forEach(u => {
