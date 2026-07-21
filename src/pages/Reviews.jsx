@@ -160,11 +160,13 @@ export default function Reviews({ currentUser }) {
   products.forEach(p => { (byStore[p.store] = byStore[p.store] || []).push(p); });
   let stores = Object.keys(byStore);
   if (!isAdmin) stores = stores.filter(s => storeMap[s] === ownerId);
-  // 방금 추가한(아직 점검 결과 없는) 업체를 맨 위로 — 나머지는 가나다순
+  // 점검 결과 없는(신규) 업체를 맨 위로 — 신규끼리는 '방금 추가 → 최근 등록' 순, 나머지는 가나다순
+  const newestOf = (s) => Math.max(0, ...(byStore[s] || []).map(p => p._placeholder ? 9e15 : (Date.parse(p.created_at || 0) || 0)));
   stores = stores.sort((a, b) => {
     const ha = (byStore[a] || []).some(p => results[p.url]);
     const hb = (byStore[b] || []).some(p => results[p.url]);
     if (ha !== hb) return ha ? 1 : -1;
+    if (!ha) return newestOf(b) - newestOf(a);
     return a.localeCompare(b, 'ko');
   });
 
