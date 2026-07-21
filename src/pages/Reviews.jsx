@@ -160,7 +160,13 @@ export default function Reviews({ currentUser }) {
   products.forEach(p => { (byStore[p.store] = byStore[p.store] || []).push(p); });
   let stores = Object.keys(byStore);
   if (!isAdmin) stores = stores.filter(s => storeMap[s] === ownerId);
-  stores = stores.sort();
+  // 방금 추가한(아직 점검 결과 없는) 업체를 맨 위로 — 나머지는 가나다순
+  stores = stores.sort((a, b) => {
+    const ha = (byStore[a] || []).some(p => results[p.url]);
+    const hb = (byStore[b] || []).some(p => results[p.url]);
+    if (ha !== hb) return ha ? 1 : -1;
+    return a.localeCompare(b, 'ko');
+  });
 
   const assignOwner = async (store, oid) => {
     setStoreMap(prev => ({ ...prev, [store]: oid }));
@@ -224,8 +230,8 @@ export default function Reviews({ currentUser }) {
         <span style={{ fontSize: 12, color: C.txm }}>매장 {stores.length}개 · 상품 {products.filter(p => !p._placeholder).length}개</span>
         {canEdit && (
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input placeholder="새 매장명" value={newStore} onChange={e => setNewStore(e.target.value)} style={{ ...inpStyle, width: 130 }} onKeyDown={e => e.key === 'Enter' && submitAddStore()} />
-            <button style={{ background: C.ac, color: '#fff', border: 'none', borderRadius: 7, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }} onClick={submitAddStore}>+ 매장 추가</button>
+            <input placeholder="새 업체명" value={newStore} onChange={e => setNewStore(e.target.value)} style={{ ...inpStyle, width: 130 }} onKeyDown={e => e.key === 'Enter' && submitAddStore()} />
+            <button style={{ background: C.ac, color: '#fff', border: 'none', borderRadius: 7, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }} onClick={submitAddStore}>+ 업체 추가</button>
           </span>
         )}
       </div>
