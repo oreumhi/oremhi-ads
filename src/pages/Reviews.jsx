@@ -10,6 +10,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { C } from '../config';
 import { fetchUsers } from '../store';
+import StaffManager from '../components/StaffManager';
 import {
   fetchReviewChecks, fetchReviewDates, fetchReviewStoreMap, setReviewStoreOwner,
   fetchReviewAliases, setProductAlias, setStoreAlias,
@@ -220,8 +221,10 @@ export default function Reviews({ currentUser }) {
       <div style={{ fontSize: 12, color: C.txd, marginBottom: 16, lineHeight: 1.6 }}>
         매장·상품별 상위 후기 중 저평점(별점 3 이하)이 상단에 있는지 매일 자동 점검합니다.
         매장·상품 추가/삭제, 이름 수정은 모두 저장되어 <b style={{ color: C.tx }}>다음날 자동 점검부터 반영</b>됩니다.
-        {isAdmin && ' (직원 계정 추가/삭제는 설정 메뉴에서)'}
+        {isAdmin && ' (직원 추가·수정은 아래 \'담당 직원 관리\'에서)'}
       </div>
+
+      {isAdmin && <StaffManager staff={staff} onChanged={loadBase} />}
 
       <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, color: C.txd }}>📅 날짜</span>
