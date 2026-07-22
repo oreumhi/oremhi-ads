@@ -258,8 +258,9 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>새 직원 추가</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
               <input style={inp} placeholder="이름" value={newStaff.name} onChange={e => setNewStaff(p => ({ ...p, name: e.target.value }))} />
-              <input style={inp} placeholder="아이디" autoComplete="off" name="new_staff_username_no_autofill" value={newStaff.username} onChange={e => setNewStaff(p => ({ ...p, username: e.target.value }))} />
-              <input style={inp} type="password" placeholder="비밀번호 (4자리+)" autoComplete="new-password" name="new_staff_pw_no_autofill" value={newStaff.password} onChange={e => setNewStaff(p => ({ ...p, password: e.target.value }))} />
+              {/* 크롬 자동완성 원천 차단: password 타입 미사용(글자만 ●로 가림) → 로그인 폼으로 인식 안 됨 */}
+              <input style={inp} placeholder="아이디" autoComplete="one-time-code" name="st_uid_x" value={newStaff.username} onChange={e => setNewStaff(p => ({ ...p, username: e.target.value }))} />
+              <input style={{ ...inp, WebkitTextSecurity: 'disc' }} type="text" placeholder="비밀번호 (4자리+)" autoComplete="one-time-code" name="st_pw_x" value={newStaff.password} onChange={e => setNewStaff(p => ({ ...p, password: e.target.value }))} />
             </div>
             <div style={{ fontSize: 12, color: C.txd, marginBottom: 6 }}>담당 브랜드 선택:</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
