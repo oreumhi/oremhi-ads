@@ -18,6 +18,7 @@ import { hashPin, uid } from './utils';
 import { useStore, fetchUsers, createUser, authenticateUser, findShareLinkByCode, authenticateShareLink } from './store';
 import { Layout } from './components/Layout';
 
+import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import Overview from './pages/Overview';
 import Upload from './pages/Upload';
@@ -178,7 +179,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [shareCode, setShareCode] = useState(null);
   const [shareBrand, setShareBrand] = useState(null);
-  const [tab, setTab] = useState(() => sessionStorage.getItem('oha_tab') || 'dashboard');
+  const [tab, setTab] = useState(() => sessionStorage.getItem('oha_tab') || 'home');
 
   // 현재 탭을 저장 → F5 새로고침해도 같은 화면 유지
   useEffect(() => { try { sessionStorage.setItem('oha_tab', tab); } catch { /* ignore */ } }, [tab]);
@@ -310,6 +311,7 @@ export default function App() {
 
   return (
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
+      {tab === 'home' && <Home currentUser={currentUser} allowedBrands={allowedBrands} setTab={setTab} />}
       {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
       {tab === 'overview' && <Overview data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} currentUser={currentUser} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} currentUser={currentUser} />}
