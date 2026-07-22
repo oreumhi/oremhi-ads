@@ -5,8 +5,9 @@
 // 브랜드/매체 단위로 크게 묶어 보는 일반적인 광고 대시보드.
 // ============================================
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { C, RANGES, AD_TYPE_ORDER, AD_TYPE_COLORS } from '../config';
+import { fetchBrandTargets } from '../store';
 import PeriodPicker, { NaverCards } from '../components/PeriodPicker';
 import { fmtWon, fmtNum, fmt, filterByRange, sumMetrics, calcCtr, calcCpa, calcRoas } from '../utils';
 import TodayAlerts from '../components/TodayAlerts';
@@ -56,6 +57,9 @@ const HeaderRow = () => (
 export default function Overview({ data, allowedBrands, changeRange, changeCustomRange, rangeLoading, currentUser }) {
   const { adData: adDataAll, mappings } = data;
   const [range, setRange] = useState(7);
+  const [targets, setTargets] = useState([]);
+  useEffect(() => { fetchBrandTargets().then(setTargets); }, []);
+  const targetBy = useMemo(() => { const m = {}; targets.forEach(t => { m[t.brand] = t; }); return m; }, [targets]);
   const [view, setView] = useState('brand'); // 'brand' | 'media'
   const [custom, setCustom] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -187,10 +191,44 @@ export default function Overview({ data, allowedBrands, changeRange, changeCusto
         const allRows = Object.values(types).flat();
         const sorted = Object.keys(types).sort((x, y) => typeRank(x) - typeRank(y));
         const color = brandColors[i % brandColors.length];
+        const bm = sumMetrics(allRows);
+        const bRoas = bm.cost > 0 ? bm.conv_revenue / bm.cost * 100 : 0;
+        const tg = targetBy[b];
+        const days = Math.max(1, new Set(allRows.map(r => r.date)).size);
+        const dailyRev = bm.conv_revenue / days;
+        const dailyCost = bm.cost / days;
         return (
           <div key={b} style={{ marginBottom: 18 }}>
-            <div style={{ background: color + '12', border: `1px solid ${color}33`, borderRadius: 10, padding: '10px 14px', marginBottom: 8 }}>
+            <div style={{ background: color + '12', border: `1px solid ${color}33`, borderRadius: 10, padding: '10px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 15, fontWeight: 800, color }}>{b}</span>
+              {tg && (
+                <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, alignItems: 'center' }}>
+                  {+tg.target_roas > 0 && (
+                    <span title={`목표 ROAS ${fmtNum(tg.target_roas)}% · 기간 ROAS ${Math.round(bRoas)}%`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: bRoas >= +tg.target_roas ? C.ok : bRoas >= +tg.target_roas * 0.9 ? C.yel : C.no, fontWeight: 700 }}>
+                      🎯 목표 달성 {Math.round(bRoas / +tg.target_roas * 100)}%
+                    </span>
+                  )}
+                  {+tg.daily_budget > 0 && (
+                    <span title={`1일 예산 ${fmtWon(tg.daily_budget)} · 기간 일평균 집행 ${fmtWon(Math.round(dailyCost))}`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: dailyCost > +tg.daily_budget * 1.2 ? C.no : C.txd }}>
+                      💳 예산 집행률 {Math.round(dailyCost / +tg.daily_budget * 100)}%
+                    </span>
+                  )}
+                  {+tg.yoy_roas > 0 && (
+                    <span title={`작년 동기 ROAS ${fmtNum(tg.yoy_roas)}%`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: bRoas >= +tg.yoy_roas ? C.ok : C.no }}>
+                      ROAS YOY {bRoas >= +tg.yoy_roas ? '▲' : '▼'}{Math.abs(Math.round(bRoas - +tg.yoy_roas))}%p
+                    </span>
+                  )}
+                  {+tg.yoy_revenue > 0 && (
+                    <span title={`작년 동기 매출(월) ${fmtWon(tg.yoy_revenue)} → 일평균 ${fmtWon(Math.round(+tg.yoy_revenue / 30))} · 이번 기간 일평균 ${fmtWon(Math.round(dailyRev))}`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: dailyRev >= +tg.yoy_revenue / 30 ? C.ok : C.no }}>
+                      매출 YOY {dailyRev >= +tg.yoy_revenue / 30 ? '▲' : '▼'}{Math.round(Math.abs(dailyRev / (+tg.yoy_revenue / 30) - 1) * 100)}%
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
             <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, overflow: 'hidden', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
