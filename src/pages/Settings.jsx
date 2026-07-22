@@ -13,8 +13,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { C } from '../config';
 import { fmt, hashPin, uid } from '../utils';
 import { fetchUsers, createUser, deleteUser, updateUser, fetchShareLinks, createShareLink, deleteShareLink, countAdData, syncStaffAssignments } from '../store';
+import BrandTargets from '../components/BrandTargets';
 
-export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
+export default function Settings({ data, clearAdData, currentUser, isAdmin, allowedBrands }) {
   const [msg, setMsg] = useState('');
 
   // ─── 직원 관리 상태 ───
@@ -177,6 +178,12 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin }) {
           <div style={{ fontWeight: 600, color: msg.includes('✅') ? C.ok : C.no, fontSize: 13 }}>{msg}</div>
         </div>
       )}
+
+      {/* ═══ 브랜드 목표 관리 (담당자 기재 — 직원도 자기 담당 브랜드 입력 가능) ═══ */}
+      <BrandTargets
+        brands={[...new Set(data.mappings.map(m => m.brand).filter(Boolean))]}
+        allowedBrands={allowedBrands}
+        currentUser={currentUser} />
 
       {/* ═══ 관리자 전용: 직원 계정 관리 ═══ */}
       {isAdmin && (
