@@ -407,6 +407,30 @@ export function useStore(currentUser) {
     }
   }, [loadedRange]);
 
+  // 사용자 지정 기간 로드 (시작~종료)
+  //   92일 이하: ad_data(일별 원본, 정확) / 2년 이하: ad_weekly / 그 외: ad_monthly
+  const changeCustomRange = useCallback(async (from, to) => {
+    if (!from || !to || from > to) return;
+    setRangeLoading(true);
+    try {
+      const span = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
+      const table = span <= 92 ? 'ad_data' : span <= 750 ? 'ad_weekly' : 'ad_monthly';
+      let rows = [];
+      if (sb) {
+        rows = await fetchPagedParallel((p, size) => sb.from(table).select('*')
+          .gte('date', from).lte('date', to)
+          .order('date', { ascending: true }).order('id', { ascending: true })
+          .range(p * size, p * size + size - 1));
+      } else {
+        try { rows = JSON.parse(localStorage.getItem('oha_ad_data') || '[]').filter(i => i.date >= from && i.date <= to); } catch { rows = []; }
+      }
+      setData(prev => ({ ...prev, adData: rows || [] }));
+      setLoadedRange(-1);   // 커스텀 상태 표시 → 기간 버튼으로 돌아가면 무조건 재로드
+    } finally {
+      setRangeLoading(false);
+    }
+  }, []);
+
   // 광고 데이터 업로드 (owner_id 자동 태깅 + 배치 업로드)
   const uploadAdData = useCallback(async (items, onProgress) => {
     const tagged = ownerId ? items.map(i => ({ ...i, owner_id: ownerId })) : items;
@@ -489,7 +513,7 @@ export function useStore(currentUser) {
     await loadData(loadedRange || 7);
   }, [ownerId, loadData, loadedRange]);
 
-  return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange };
+  return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange };
 }
 
 // ─── 광고주 리포트용 데이터 조회 ───
