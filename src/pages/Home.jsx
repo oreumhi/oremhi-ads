@@ -498,7 +498,7 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
       let chat = { s: 'gray', t: '연결된 대화방 없음' };
       const sc = Object.entries(latestScore).find(([cn]) => nMatch(cn, brand));
       if (sc) {
-        const total = +sc[1].total || 0;
+        const total = +sc[1].score_total || 0;
         const silent = sc[1].period_end ? Math.floor((new Date(t) - new Date(sc[1].period_end)) / 86400000) : 0;
         if (silent >= 14) chat = { s: 'red', t: `${silent}일째 대화 없음 (침묵)` };
         else chat = total >= 60 ? { s: 'green', t: `소통 점수 ${total}점 (양호)` } : total >= 40 ? { s: 'yellow', t: `소통 점수 ${total}점 (보통)` } : { s: 'red', t: `소통 점수 ${total}점 (개선 필요)` };
@@ -535,21 +535,34 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
       if (p.brand && title.startsWith(p.brand)) title = title.slice(p.brand.length).trim();
       todos.push({ sev: 'high', brand: p.brand, title, desc: p.memo || '', tab: 'overview' });
     });
+    // 후기 저평점: 브랜드(매장) 단위로 묶어 1건씩만
+    const lowByBrand = {};
     D.reviewsToday.forEach(c => {
       if (!(+c.low_count > 0)) return;
       const brand = storeBrand[c.store] || c.store;
       if (!inB(brand)) return;
-      todos.push({ sev: 'high', brand, title: `저평점 후기 ${c.low_count}건`, desc: '내용 확인 후 대응이 필요합니다', tab: 'reviews' });
+      lowByBrand[brand] = (lowByBrand[brand] || 0) + (+c.low_count);
     });
+    Object.entries(lowByBrand).forEach(([brand, low]) => {
+      todos.push({ sev: 'high', brand, title: `저평점 후기 ${low}건`, desc: '내용 확인 후 대응이 필요합니다', tab: 'reviews' });
+    });
+    // 순위 미노출·급락: 브랜드 단위로 묶기
+    const missByBrand = {}, dropByBrand = {};
     Object.values(rankByProduct).forEach(e => {
       if (!inB(e.brand)) return;
       const ds = Object.keys(e.days).sort().reverse();
       const cur = e.days[ds[0]], prv = ds[1] != null ? e.days[ds[1]] : undefined;
       if (cur == null && ds[0] >= addDays(t, -1)) {
-        todos.push({ sev: 'high', brand: e.brand, title: '순위 미노출', desc: `'${e.keyword}' 검색 결과에 없음`, tab: 'rank' });
+        (missByBrand[e.brand] = missByBrand[e.brand] || []).push(e.keyword);
       } else if (cur != null && prv != null && cur - prv >= 5) {
-        todos.push({ sev: 'mid', brand: e.brand, title: `순위 급락 ${prv}위 → ${cur}위`, desc: `'${e.keyword}'`, tab: 'rank' });
+        (dropByBrand[e.brand] = dropByBrand[e.brand] || []).push(`'${e.keyword}' ${prv}→${cur}위`);
       }
+    });
+    Object.entries(missByBrand).forEach(([brand, kws]) => {
+      todos.push({ sev: 'high', brand, title: `순위 미노출 ${kws.length}건`, desc: kws.slice(0, 3).map(k => `'${k}'`).join(', ') + (kws.length > 3 ? ` 외 ${kws.length - 3}건` : ''), tab: 'rank' });
+    });
+    Object.entries(dropByBrand).forEach(([brand, ds2]) => {
+      todos.push({ sev: 'mid', brand, title: `순위 급락 ${ds2.length}건`, desc: ds2.slice(0, 2).join(', ') + (ds2.length > 2 ? ' 외' : ''), tab: 'rank' });
     });
     D.radar.filter(a => inB(a.brand)).forEach(a => {
       todos.push({ sev: 'mid', brand: a.brand, title: `경쟁사 ${a.kind}`, desc: `[${a.keyword}] ${(a.title || '').slice(0, 24)} — ${a.detail || ''}` });
