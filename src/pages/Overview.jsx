@@ -7,6 +7,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { C, RANGES, AD_TYPE_ORDER, AD_TYPE_COLORS } from '../config';
+import PeriodPicker, { NaverCards } from '../components/PeriodPicker';
 import { fmtWon, fmtNum, fmt, filterByRange, sumMetrics, calcCtr, calcCpa, calcRoas } from '../utils';
 import TodayAlerts from '../components/TodayAlerts';
 
@@ -52,15 +53,27 @@ const HeaderRow = () => (
   </thead>
 );
 
-export default function Overview({ data, allowedBrands, changeRange, rangeLoading, currentUser }) {
-  const { adData, mappings } = data;
+export default function Overview({ data, allowedBrands, changeRange, changeCustomRange, rangeLoading, currentUser }) {
+  const { adData: adDataAll, mappings } = data;
   const [range, setRange] = useState(7);
   const [view, setView] = useState('brand'); // 'brand' | 'media'
+  const [custom, setCustom] = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const adData = useMemo(
+    () => custom ? adDataAll.filter(r => r.date >= custom.from && r.date <= custom.to) : adDataAll,
+    [adDataAll, custom]);
 
   const handleRangeChange = async (v) => {
+    setCustom(null); setShowPicker(false);
     setRange(v);
     if (changeRange) await changeRange(v);
   };
+  const applyCustom = async (from, to) => {
+    setCustom({ from, to });
+    setRange(0);
+    if (changeCustomRange) await changeCustomRange(from, to);
+  };
+  const clearCustom = async () => { await handleRangeChange(7); };
 
   // ─── 브랜드 × 매체 데이터 구조화 ───
   const grouped = useMemo(() => {
@@ -100,13 +113,33 @@ export default function Overview({ data, allowedBrands, changeRange, rangeLoadin
           {RANGES.map(r => (
             <button key={r.value} onClick={() => handleRangeChange(r.value)} style={{
               padding: '7px 13px', borderRadius: 7, border: 'none', cursor: 'pointer',
-              fontSize: 13, fontWeight: range === r.value ? 600 : 400,
-              background: range === r.value ? C.ac : 'transparent',
-              color: range === r.value ? '#fff' : C.txd,
+              fontSize: 13, fontWeight: !custom && range === r.value ? 600 : 400,
+              background: !custom && range === r.value ? C.ac : 'transparent',
+              color: !custom && range === r.value ? '#fff' : C.txd,
             }}>{r.label}</button>
           ))}
+          <button onClick={() => setShowPicker(s => !s)} style={{
+            padding: '7px 13px', borderRadius: 7, border: 'none', cursor: 'pointer',
+            fontSize: 13, fontWeight: custom ? 700 : 400,
+            background: custom ? C.ac : 'transparent', color: custom ? '#fff' : C.txd,
+          }}>📅 기간 지정</button>
         </div>
       </div>
+
+      {(showPicker || custom) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: C.txd, fontWeight: 600 }}>기간 지정</span>
+          <PeriodPicker value={custom} onApply={applyCustom} onClear={clearCustom} />
+          {custom && <span style={{ fontSize: 11, color: C.txm }}>{custom.from} ~ {custom.to}</span>}
+        </div>
+      )}
+
+      {custom && (
+        <NaverCards items={[
+          { label: '총광고비', value: total.cost, unit: '원', color: '#f5a445', sub: `${custom.from} ~ ${custom.to}` },
+          { label: '구매전환매출액', value: total.conv_revenue, unit: '원', color: '#5b8def', sub: `ROAS ${Math.round(totalRoas)}%` },
+        ]} />
+      )}
 
       {/* 오늘 챙길 것 (이상 감지 알림) */}
       <TodayAlerts currentUser={currentUser} allowedBrands={allowedBrands} />
