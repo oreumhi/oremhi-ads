@@ -325,7 +325,7 @@ export default function App() {
       {tab === 'proposals' && <Proposals currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'team' && <Team currentUser={currentUser} />}
       {tab === 'panal' && <ProductAnalysis currentUser={currentUser} />}
-      {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} />}
+      {tab === 'settings' && <Settings data={data} clearAdData={clearAdData} currentUser={currentUser} isAdmin={isAdmin} allowedBrands={allowedBrands} />}
     </Layout>
   );
 }
