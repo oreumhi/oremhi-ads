@@ -153,6 +153,17 @@ export async function fetchReviewChecks(date, ownerId) {
   return data || [];
 }
 
+export async function fetchReviewChecksRange(fromDate, toDate, ownerId) {
+  if (!sb) return [];
+  let q = sb.from('review_checks').select('*')
+    .gte('date', fromDate).lte('date', toDate)
+    .order('date', { ascending: false }).limit(5000);
+  if (ownerId) q = q.eq('owner_id', ownerId);
+  const { data, error } = await q;
+  if (error) { console.error('[review_checks] 기간 조회:', error.message); return []; }
+  return data || [];
+}
+
 export async function fetchReviewDates(ownerId) {
   if (!sb) return [];
   let q = sb.from('review_checks').select('date').order('date', { ascending: false }).limit(2000);
