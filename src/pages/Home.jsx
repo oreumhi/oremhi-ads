@@ -467,6 +467,15 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     const todos = [];
     const rows = [];
 
+    // 성과 경고 이벤트: 최근 7일 것만, 브랜드당 최신 1건 (오래된 미해결 건이 홈을 뒤덮지 않도록)
+    const recentPerf = [];
+    const seenPerfBrand = new Set();
+    D.perfAlerts.filter(p => inB(p.brand) && (p.event_date || '') >= addDays(t, -7)).forEach(p => {
+      if (seenPerfBrand.has(p.brand)) return;
+      seenPerfBrand.add(p.brand);
+      recentPerf.push(p);
+    });
+
     Object.entries(byBrand).forEach(([brand, d]) => {
       const rec = sumM(d.recent), prev = sumM(d.prev), yd = sumM(d.yday);
       const rRoas = roasOf(rec), pRoas = roasOf(prev);
@@ -475,10 +484,12 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
         const prevDailyImp = prev.imp / 7;
         if (prevDailyImp > 500 && d.r2imp < prevDailyImp * 0.2) {
           perf = { s: 'red', t: '노출 급감 — 광고 중단 의심' };
-          todos.push({ sev: 'high', brand, title: '노출 급감 — 광고 중단 의심', desc: '최근 노출이 이전 평균의 20% 미만', tab: 'overview' });
+          if (!seenPerfBrand.has(brand)) todos.push({ sev: 'high', brand, title: '노출 급감 — 광고 중단 의심', desc: '최근 노출이 이전 평균의 20% 미만', tab: 'overview' });
         } else if (pRoas > 50 && rec.cost > 30000 && rRoas < pRoas * 0.7) {
-          perf = { s: 'red', t: `ROAS 급락 ${(pRoas / 100).toFixed(1)}배→${(rRoas / 100).toFixed(1)}배` };
-          todos.push({ sev: 'high', brand, title: 'ROAS 하락', desc: `${(pRoas / 100).toFixed(2)}배 → ${(rRoas / 100).toFixed(2)}배`, tab: 'overview' });
+          // 하락 후에도 ROAS 4배 이상이면 '주의', 그 아래면 '긴급'
+          const stillGood = rRoas >= 400;
+          perf = { s: stillGood ? 'yellow' : 'red', t: `ROAS 하락 ${(pRoas / 100).toFixed(1)}배→${(rRoas / 100).toFixed(1)}배` };
+          if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${(pRoas / 100).toFixed(2)}배 → ${(rRoas / 100).toFixed(2)}배`, tab: 'overview' });
         } else if (pRoas > 50 && rRoas < pRoas * 0.85) {
           perf = { s: 'yellow', t: `ROAS 완만한 하락 (${(rRoas / 100).toFixed(2)}배)` };
         }
@@ -519,8 +530,10 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     rows.sort((a, b) => b.cost - a.cost || a.brand.localeCompare(b.brand));
 
     // ── 오늘 챙길 것 나머지 ──
-    D.perfAlerts.filter(p => inB(p.brand)).forEach(p => {
-      todos.push({ sev: 'high', brand: p.brand, title: p.title || '성과 경고', desc: p.memo || '', tab: 'overview' });
+    recentPerf.forEach(p => {
+      let title = p.title || '성과 경고';
+      if (p.brand && title.startsWith(p.brand)) title = title.slice(p.brand.length).trim();
+      todos.push({ sev: 'high', brand: p.brand, title, desc: p.memo || '', tab: 'overview' });
     });
     D.reviewsToday.forEach(c => {
       if (!(+c.low_count > 0)) return;
