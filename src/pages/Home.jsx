@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
-import { sb, fetchAdDaily, fetchUsers } from '../store';
+import { sb, fetchAdDaily, fetchUsers, fetchBrandTargets } from '../store';
 import { fetchTodayPromises, fetchOpenPerfAlerts, fetchReportsByDate, fetchOpenActions, fetchEventsRange } from '../team';
 import { fetchChatScores, fetchChatUploads, fetchReviewChecks, fetchReviewStoreMap } from '../chat';
 import { fetchRankHistory, fetchRankProducts } from '../rank';
@@ -291,6 +291,7 @@ function SignalBoard({ rows }) {
               <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>어제 광고비</th>
               <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>어제 매출</th>
               <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>ROAS</th>
+              <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>목표 달성</th>
               {['성과', '대화', '후기', '순위'].map(h => <th key={h} style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 600 }}>{h}</th>)}
             </tr>
           </thead>
@@ -301,6 +302,15 @@ function SignalBoard({ rows }) {
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.cost > 0 ? won(r.cost) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.rev > 0 ? won(r.rev) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: r.cost > 0 ? (r.roas >= 300 ? C.ok : r.roas >= 100 ? C.tx : C.no) : C.txm }}>{r.cost > 0 ? Math.round(r.roas) + '%' : '—'}</td>
+                <td title={r.goal ? `목표 ROAS ${fmtNum(r.goal.target)}% 기준 · 최근 7일${r.goal.yoyDiff != null ? ` · 작년 동기 대비 ${r.goal.yoyDiff >= 0 ? '+' : ''}${r.goal.yoyDiff}%p` : ''}` : '목표 미기재 (설정 → 브랜드 목표 관리)'}
+                  style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: !r.goal ? C.txm : r.goal.rate >= 100 ? C.ok : r.goal.rate >= 90 ? C.yel : C.no }}>
+                  {r.goal ? r.goal.rate + '%' : '—'}
+                  {r.goal && r.goal.yoyDiff != null && (
+                    <span style={{ fontSize: 9.5, marginLeft: 4, color: r.goal.yoyDiff >= 0 ? C.ok : C.no, fontWeight: 600 }}>
+                      YOY{r.goal.yoyDiff >= 0 ? '▲' : '▼'}
+                    </span>
+                  )}
+                </td>
                 {['perf', 'chat', 'review', 'rank'].map(k => (
                   <td key={k} style={{ padding: '8px 6px', textAlign: 'center' }}><Dot color={G[r[k].s]} title={r[k].t} /></td>
                 ))}
@@ -309,7 +319,7 @@ function SignalBoard({ rows }) {
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 10, color: C.txm, marginTop: 8 }}>· 신호에 마우스를 올리면 상세 사유가 표시됩니다 · 성과: 최근 7일 vs 직전 7일 · 대화: 최신 소통 점수 · 후기: 오늘 점검 결과 · 순위: 최신 수집 결과</div>
+      <div style={{ fontSize: 10, color: C.txm, marginTop: 8 }}>· 신호에 마우스를 올리면 상세 사유가 표시됩니다 · 성과: 목표 기재 시 목표 ROAS 기준, 미기재 시 최근 7일 vs 직전 7일 · 목표 달성: 최근 7일 ROAS ÷ 목표 ROAS (설정 → 🎯 브랜드 목표 관리) · 대화: 최신 소통 점수 · 후기: 오늘 점검 결과 · 순위: 최신 수집 결과</div>
     </div>
   );
 }
@@ -416,13 +426,14 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
         sb ? sb.from('market_radar_alerts').select('*').eq('date', t) : { data: [] },
         sb ? sb.from('job_heartbeat').select('*') : { data: [] },
       ]);
+      const targets = await fetchBrandTargets();
       setD({
         ad: ad || [], promises: promises || [], perfAlerts: perfAlerts || [],
         chatScores: chatScores || [], chatUploads: chatUploads || [],
         reviewsToday: reviewsToday || [], storeMap: storeMap || [],
         rankHist: rankHist || [], rankProds: rankProds || [],
         users: users || [], reports: reports || [], actions: actions || [], events: events || [],
-        radar: radarRes.data || [], hb: hbRes.data || [],
+        radar: radarRes.data || [], hb: hbRes.data || [], targets: targets || [],
       });
       setLoading(false);
     })();
@@ -476,22 +487,50 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
       recentPerf.push(p);
     });
 
+    // 브랜드 목표 (담당자 기재 — 설정의 '브랜드 목표 관리')
+    const targetBy = {};
+    (D.targets || []).forEach(x => { targetBy[x.brand] = x; });
+
     Object.entries(byBrand).forEach(([brand, d]) => {
       const rec = sumM(d.recent), prev = sumM(d.prev), yd = sumM(d.yday);
       const rRoas = roasOf(rec), pRoas = roasOf(prev);
+      const tg = targetBy[brand];
       let perf = { s: rec.cost > 1000 ? 'green' : 'gray', t: rec.cost > 1000 ? '최근 7일 정상 집행' : '최근 집행 없음' };
       if (rec.cost > 1000 || prev.cost > 1000) {
         const prevDailyImp = prev.imp / 7;
         if (prevDailyImp > 500 && d.r2imp < prevDailyImp * 0.2) {
           perf = { s: 'red', t: '노출 급감 — 광고 중단 의심' };
           if (!seenPerfBrand.has(brand)) todos.push({ sev: 'high', brand, title: '노출 급감 — 광고 중단 의심', desc: '최근 노출이 이전 평균의 20% 미만', tab: 'overview' });
+        } else if (tg && +tg.target_roas > 0 && rec.cost > 30000) {
+          // 목표가 있으면 목표 기준으로 판단 (담당자가 정한 기준이 우선)
+          const rate = rRoas / +tg.target_roas * 100;
+          if (rate < 70) {
+            perf = { s: 'red', t: `목표 ROAS ${fmtNum(+tg.target_roas)}% 대비 ${Math.round(rate)}% 달성 — 크게 미달` };
+            todos.push({ sev: 'high', brand, title: '목표 ROAS 크게 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}% (달성 ${Math.round(rate)}%)`, tab: 'overview' });
+          } else if (rate < 90) {
+            perf = { s: 'yellow', t: `목표 ROAS 대비 ${Math.round(rate)}% 달성 — 미달` };
+            todos.push({ sev: 'mid', brand, title: '목표 ROAS 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}%`, tab: 'overview' });
+          } else {
+            perf = { s: 'green', t: `목표 ROAS 대비 ${Math.round(rate)}% 달성` };
+          }
         } else if (pRoas > 50 && rec.cost > 30000 && rRoas < pRoas * 0.7) {
-          // 하락 후에도 ROAS 4배 이상이면 '주의', 그 아래면 '긴급'
+          // 목표 미기재 브랜드는 기존처럼 자기 과거 대비로 판단
           const stillGood = rRoas >= 400;
           perf = { s: stillGood ? 'yellow' : 'red', t: `ROAS 하락 ${Math.round(pRoas)}%→${Math.round(rRoas)}%` };
           if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${Math.round(pRoas)}% → ${Math.round(rRoas)}%`, tab: 'overview' });
         } else if (pRoas > 50 && rRoas < pRoas * 0.85) {
           perf = { s: 'yellow', t: `ROAS 완만한 하락 (${Math.round(rRoas)}%)` };
+        }
+      }
+      // 1일 예산 대비 어제 집행 점검 (목표 기재 시)
+      if (tg && +tg.daily_budget > 0 && yd.cost >= 0) {
+        const b = +tg.daily_budget;
+        if (yd.cost > b * 1.2) {
+          todos.push({ sev: 'high', brand, title: '1일 예산 초과', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'overview' });
+        } else if (yd.cost < b * 0.3 && d.yday.length > 0) {
+          todos.push({ sev: 'high', brand, title: '예산 대비 집행 급감 — 광고 축소·중단 의심', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'overview' });
+        } else if (yd.cost < b * 0.3 && d.yday.length === 0 && rec.cost > 1000) {
+          todos.push({ sev: 'high', brand, title: '어제 집행 기록 없음', desc: `1일 예산 ${won(b)}인데 어제 데이터가 없습니다`, tab: 'overview' });
         }
       }
       // 대화 신호
@@ -525,7 +564,13 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
           : drop > 0 ? { s: 'yellow', t: `순위 급락 ${drop}건` }
           : { s: 'green', t: `${okc}개 키워드 정상 노출` };
       }
-      rows.push({ brand, cost: yd.cost, rev: yd.rev, roas: roasOf(yd), perf, chat, review, rank });
+      // 목표 달성률(최근 7일 ROAS ÷ 목표 ROAS) + YOY(작년 동기 ROAS 대비)
+      let goal = null;
+      if (tg && +tg.target_roas > 0 && rec.cost > 1000) {
+        goal = { rate: Math.round(rRoas / +tg.target_roas * 100), target: +tg.target_roas };
+        if (+tg.yoy_roas > 0) goal.yoyDiff = Math.round(rRoas - +tg.yoy_roas);
+      }
+      rows.push({ brand, cost: yd.cost, rev: yd.rev, roas: roasOf(yd), perf, chat, review, rank, goal });
     });
     rows.sort((a, b) => b.cost - a.cost || a.brand.localeCompare(b.brand));
 
