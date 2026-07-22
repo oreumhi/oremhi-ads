@@ -311,7 +311,7 @@ function TargetManager({ staff, onChanged }) {
                 <td style={td}>
                   <select style={selStyle} disabled={busy === it.id} value={it.owner_id || ''} onChange={e => assign(it, e.target.value)}>
                     <option value="">— 미지정 —</option>
-                    {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'admin' ? ' (대표)' : ''}</option>)}
                   </select>
                 </td>
                 <td style={td}><button style={{ ...btnGhost, color: it.active ? C.ok : C.no }} onClick={() => toggle(it)}>{it.active ? '수집중' : '제외됨'}</button></td>
@@ -349,6 +349,7 @@ export default function RankCheck({ currentUser }) {
   const isAdmin = currentUser?.role === 'admin';
   const [history, setHistory] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [assignees, setAssignees] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -360,6 +361,9 @@ export default function RankCheck({ currentUser }) {
     ]);
     setHistory(h);
     setStaff((users || []).filter(u => u.role === 'staff'));
+    // 담당 지정 후보 = 관리자(대표) + 직원 (계정 관리 패널에는 직원만)
+    setAssignees((users || []).filter(u => u.role === 'admin' || u.role === 'staff')
+      .sort((a, b) => (a.role === 'admin' ? -1 : 1) - (b.role === 'admin' ? -1 : 1)));
     setLoading(false);
   }, [isAdmin, currentUser]);
   useEffect(() => { load(); }, [load]);
@@ -375,7 +379,7 @@ export default function RankCheck({ currentUser }) {
       </div>
 
       {isAdmin && <StaffManager staff={staff} onChanged={load} />}
-      {isAdmin && <TargetManager staff={staff} onChanged={load} />}
+      {isAdmin && <TargetManager staff={assignees} onChanged={load} />}
 
       {!loading && <RankTrendChart history={history} />}
 
