@@ -5,7 +5,7 @@
 //   실제 수집은 각 직원 PC의 "순위체크" 프로그램이 수행 → 여기서 결과만 확인
 // ============================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { C } from '../config';
 import { fetchUsers } from '../store';
 import StaffManager from '../components/StaffManager';
@@ -75,6 +75,117 @@ function RankResultsTable({ history, showStaff }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ─── 순위 추이 그래프 (과거 → 현재) ───
+const TREND_COLORS = ['#5b8def', '#3dd9a0', '#f5a445', '#ed6ea0', '#9d7ff0', '#45c8dc', '#f0c746', '#f07070', '#8fd14f', '#c9a227'];
+const isShopT = (t) => t === 'shopping' || t === '쇼핑';
+
+function RankTrendChart({ history }) {
+  const [adType, setAdType] = useState('shopping');
+  const [brand, setBrand] = useState('전체');
+  const [days, setDays] = useState(30);
+
+  const brands = useMemo(() => [...new Set(history.map(h => h.brand).filter(Boolean))].sort(), [history]);
+
+  const { dates, series, maxR } = useMemo(() => {
+    const today = new Date();
+    const ds = Array.from({ length: days }, (_, i) => {
+      const d = new Date(today); d.setDate(d.getDate() - (days - 1 - i));
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+    const idx = Object.fromEntries(ds.map((d, i) => [d, i]));
+    const byKey = {};
+    let mr = 5;
+    history.forEach(h => {
+      if (adType === 'shopping' ? !isShopT(h.ad_type) : isShopT(h.ad_type)) return;
+      if (brand !== '전체' && h.brand !== brand) return;
+      const day = (h.collected_at || '').slice(0, 10);
+      if (!(day in idx)) return;
+      const k = `${h.brand}·${h.product || ''}·${h.keyword}`;
+      const s = (byKey[k] = byKey[k] || { label: k, vals: Array(days).fill(undefined) });
+      if (s.vals[idx[day]] === undefined) {   // history는 최신순 → 하루 중 최신값 유지
+        s.vals[idx[day]] = h.rank;            // null = 미노출
+        if (h.rank != null) mr = Math.max(mr, h.rank);
+      }
+    });
+    return { dates: ds, series: Object.values(byKey), maxR: Math.min(Math.max(mr, 5), 20) };
+  }, [history, adType, brand, days]);
+
+  const W = 760, H = 250, PL = 40, PR = 10, PT = 12, PB = 24;
+  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 30, ih = ihAll - missBand;
+  const xAt = (i) => dates.length <= 1 ? PL + iw / 2 : PL + i / (dates.length - 1) * iw;
+  const yAt = (r) => r == null ? PT + ih + missBand - 8 : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
+
+  const gridRanks = [...new Set([1, Math.ceil((maxR + 1) / 2), maxR])];
+  const hasData = series.some(s => s.vals.some(v => v !== undefined));
+
+  const tabBtn = (on) => ({ ...btnGhost, padding: '5px 12px', fontSize: 12,
+    background: on ? C.ac : 'none', color: on ? '#fff' : C.txd, borderColor: on ? C.ac : C.bd, fontWeight: on ? 700 : 400 });
+
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>📈 순위 추이 <span style={{ fontSize: 12, color: C.txd, fontWeight: 400 }}>— 선이 위로 갈수록 상위 노출 (1위가 맨 위)</span></div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {[['shopping', '쇼핑'], ['powerlink', '파워링크']].map(([k, l]) =>
+            <button key={k} style={tabBtn(adType === k)} onClick={() => setAdType(k)}>{l}</button>)}
+          <span style={{ width: 8 }} />
+          {[7, 30, 90].map(d => <button key={d} style={tabBtn(days === d)} onClick={() => setDays(d)}>{d}일</button>)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+        {['전체', ...brands].map(b => <button key={b} style={tabBtn(brand === b)} onClick={() => setBrand(b)}>{b}</button>)}
+      </div>
+
+      {!hasData ? (
+        <div style={{ fontSize: 13, color: C.txm, padding: 20, textAlign: 'center' }}>이 조건의 추이 데이터가 아직 없습니다. 매일 새벽 수집이 쌓이면 선이 그려집니다.</div>
+      ) : (
+        <>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+            {gridRanks.map(r => (
+              <g key={r}>
+                <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={C.bd} strokeDasharray="3 4" />
+                <text x={PL - 6} y={yAt(r) + 4} fontSize="10" fill={C.txd} textAnchor="end">{r}위</text>
+              </g>
+            ))}
+            <line x1={PL} y1={PT + ih + 10} x2={W - PR} y2={PT + ih + 10} stroke={C.no + '55'} strokeDasharray="2 3" />
+            <text x={PL - 6} y={PT + ih + missBand - 5} fontSize="10" fill={C.no} textAnchor="end">미노출</text>
+            {series.map((s, si) => {
+              const color = TREND_COLORS[si % TREND_COLORS.length];
+              const pts = s.vals.map((v, i) => v === undefined ? null : [xAt(i), yAt(v), v]).filter(Boolean);
+              const segs = [];
+              let cur = [];
+              s.vals.forEach((v, i) => {
+                if (v === undefined) { if (cur.length > 1) segs.push(cur); cur = []; }
+                else cur.push(`${xAt(i)},${yAt(v)}`);
+              });
+              if (cur.length > 1) segs.push(cur);
+              return (
+                <g key={s.label}>
+                  {segs.map((sg, gi) => <polyline key={gi} points={sg.join(' ')} fill="none" stroke={color} strokeWidth="2" opacity="0.9" />)}
+                  {pts.map(([px, py, v], pi) => v == null
+                    ? <circle key={pi} cx={px} cy={py} r="3" fill="none" stroke={C.no} strokeWidth="1.5" />
+                    : <circle key={pi} cx={px} cy={py} r="3" fill={color} />)}
+                </g>
+              );
+            })}
+            {[0, Math.floor((dates.length - 1) / 2), dates.length - 1].map(i => (
+              <text key={i} x={xAt(i)} y={H - 8} fontSize="10" fill={C.txd} textAnchor="middle">{dates[i].slice(5).replace('-', '.')}</text>
+            ))}
+          </svg>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+            {series.map((s, si) => (
+              <span key={s.label} style={{ fontSize: 11.5, color: C.txd }}>
+                <span style={{ color: TREND_COLORS[si % TREND_COLORS.length], fontWeight: 800 }}>—</span> {s.label}
+              </span>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: C.txm, marginTop: 6 }}>● 채워진 점 = 순위 · ○ 빨간 테두리 점 = 미노출 (아래 띠) · 선이 끊긴 곳 = 그날 수집 없음</div>
+        </>
+      )}
     </div>
   );
 }
@@ -180,7 +291,7 @@ export default function RankCheck({ currentUser }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const since = new Date(Date.now() - 30 * 864e5).toISOString();
+    const since = new Date(Date.now() - 90 * 864e5).toISOString();   // 추이 그래프 최대 90일
     const [h, users] = await Promise.all([
       fetchRankHistory(isAdmin ? null : currentUser.id, since),
       isAdmin ? fetchUsers() : Promise.resolve([]),
@@ -203,6 +314,8 @@ export default function RankCheck({ currentUser }) {
 
       {isAdmin && <StaffManager staff={staff} onChanged={load} />}
       {isAdmin && <TargetManager staff={staff} onChanged={load} />}
+
+      {!loading && <RankTrendChart history={history} />}
 
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{isAdmin ? '최신 순위 (전체)' : '내 최신 순위'}</div>
