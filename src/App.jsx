@@ -235,6 +235,7 @@ export default function App() {
     sessionStorage.setItem('oha_user', JSON.stringify(user));
     setCurrentUser(user);
     setMode('app');
+    setTab('home');   // 로그인 첫 화면은 항상 홈
   };
 
   // ─── 로그아웃 ───
@@ -243,7 +244,7 @@ export default function App() {
     sessionStorage.removeItem('oha_tab');
     setCurrentUser(null);
     setMode('login');
-    setTab('dashboard');
+    setTab('home');
   };
 
   // ─── 관리자 초기 설정 완료 ───
@@ -251,6 +252,7 @@ export default function App() {
     sessionStorage.setItem('oha_user', JSON.stringify(user));
     setCurrentUser(user);
     setMode('app');
+    setTab('home');
   };
 
   // ─── 공유 링크 인증 성공 ───
