@@ -320,7 +320,7 @@ export default function App() {
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} removeBrand={removeBrand} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'chat' && <Conversations currentUser={currentUser} />}
       {tab === 'reviews' && <Reviews currentUser={currentUser} />}
-      {tab === 'rank' && <RankCheck currentUser={currentUser} />}
+      {tab === 'rank' && <RankCheck currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'report' && <Report currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'proposals' && <Proposals currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'team' && <Team currentUser={currentUser} />}
