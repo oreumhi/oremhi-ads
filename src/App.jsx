@@ -184,7 +184,7 @@ export default function App() {
   // 현재 탭을 저장 → F5 새로고침해도 같은 화면 유지
   useEffect(() => { try { sessionStorage.setItem('oha_tab', tab); } catch { /* ignore */ } }, [tab]);
 
-  const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange } = useStore(currentUser);
+  const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange } = useStore(currentUser);
 
   // ─── 초기화: URL 체크 → 사용자 확인 ───
   useEffect(() => {
@@ -314,8 +314,8 @@ export default function App() {
   return (
     <Layout tab={tab} setTab={setTab} currentUser={currentUser} onLogout={handleLogout}>
       {tab === 'home' && <Home currentUser={currentUser} allowedBrands={allowedBrands} setTab={setTab} />}
-      {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} />}
-      {tab === 'overview' && <Overview data={data} allowedBrands={allowedBrands} changeRange={changeRange} rangeLoading={rangeLoading} currentUser={currentUser} />}
+      {tab === 'dashboard' && <Dashboard data={data} allowedBrands={allowedBrands} changeRange={changeRange} changeCustomRange={changeCustomRange} rangeLoading={rangeLoading} />}
+      {tab === 'overview' && <Overview data={data} allowedBrands={allowedBrands} changeRange={changeRange} changeCustomRange={changeCustomRange} rangeLoading={rangeLoading} currentUser={currentUser} />}
       {tab === 'upload' && <Upload data={data} uploadAdData={uploadAdData} currentUser={currentUser} />}
       {tab === 'mapping' && <Mapping data={data} addMapping={addMapping} removeMapping={removeMapping} removeBrand={removeBrand} deleteAdDataByKeys={deleteAdDataByKeys} currentUser={currentUser} />}
       {tab === 'chat' && <Conversations currentUser={currentUser} />}
