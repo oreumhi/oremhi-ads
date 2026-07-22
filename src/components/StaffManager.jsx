@@ -90,8 +90,9 @@ export default function StaffManager({ staff, onChanged }) {
             <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>새 직원 추가</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <input placeholder="이름 (예: 홍길동)" value={nf.name} onChange={e => setNf({ ...nf, name: e.target.value })} style={{ ...inp, width: 120 }} />
-              <input placeholder="로그인 아이디" autoComplete="off" name="sm_new_username_no_autofill" value={nf.username} onChange={e => setNf({ ...nf, username: e.target.value })} style={{ ...inp, width: 130 }} />
-              <input type="password" placeholder="비밀번호 (4자리+)" autoComplete="new-password" name="sm_new_pw_no_autofill" value={nf.password} onChange={e => setNf({ ...nf, password: e.target.value })} style={{ ...inp, width: 140 }} />
+              {/* 크롬 자동완성 원천 차단: password 타입을 쓰지 않고 글자만 ●로 가림 → 로그인 폼으로 인식 안 됨 */}
+              <input placeholder="로그인 아이디" autoComplete="one-time-code" name="sm_uid_x" value={nf.username} onChange={e => setNf({ ...nf, username: e.target.value })} style={{ ...inp, width: 130 }} />
+              <input type="text" placeholder="비밀번호 (4자리+)" autoComplete="one-time-code" name="sm_pw_x" value={nf.password} onChange={e => setNf({ ...nf, password: e.target.value })} style={{ ...inp, width: 140, WebkitTextSecurity: 'disc' }} />
               <button style={btn} onClick={add}>직원 추가</button>
             </div>
           </div>
