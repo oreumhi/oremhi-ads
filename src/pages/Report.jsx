@@ -5,7 +5,7 @@
 // ============================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchAdDaily, fetchAdDataWindow, fetchMappingsAll, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
+import { fetchAdDaily, fetchAdDataWindow, fetchMappingsAll, fetchBrandTargets, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
 const R = {
@@ -235,6 +235,9 @@ export default function Report({ currentUser, allowedBrands }) {
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { fetchMappingsAll().then(setMappings); }, []);   // 광고별 상세 라벨용 (지연)
+  const [targets, setTargets] = useState([]);
+  useEffect(() => { fetchBrandTargets().then(setTargets); }, []);
+  const tg = useMemo(() => targets.find(x => x.brand === brand) || null, [targets, brand]);
 
   const mapByKey = useMemo(() => { const m = {}; mappings.forEach(x => m[x.match_key] = x); return m; }, [mappings]);
   const brands = useMemo(() => {
@@ -514,6 +517,48 @@ export default function Report({ currentUser, allowedBrands }) {
             <Kpi label="구매완료 전환율" value={cvrOf(cur).toFixed(1) + '%'} cur={cvrOf(cur)} prev={cvrOf(prev)} />
             <Kpi label="평균 CPC" value={won(cpcOf(cur))} cur={cpcOf(cur)} prev={cpcOf(prev)} invert />
           </div>
+
+          {/* 목표·작년 동기(YOY) 비교 — 설정의 '브랜드 목표 관리'에 기재된 경우만 */}
+          {tg && (+tg.target_roas > 0 || +tg.daily_budget > 0 || +tg.yoy_roas > 0 || +tg.yoy_revenue > 0 || +tg.yoy_budget > 0) && (() => {
+            const curRoas = roasOf(cur);
+            const dailyCost = cur.cost / P.n, dailyRev = cur.revenue / P.n;
+            const cells = [];
+            if (+tg.target_roas > 0) {
+              const rate = Math.round(curRoas / +tg.target_roas * 100);
+              cells.push({ l: '목표 ROAS 달성률', v: rate + '%', s: `목표 ${fmtNum(+tg.target_roas)}%`, c: rate >= 100 ? R.ok : rate >= 90 ? R.warn : R.no });
+            }
+            if (+tg.daily_budget > 0) {
+              const rate = Math.round(dailyCost / +tg.daily_budget * 100);
+              cells.push({ l: '1일 예산 집행률', v: rate + '%', s: `예산 ${won(+tg.daily_budget)}/일`, c: rate > 120 ? R.no : rate < 30 ? R.warn : R.ink });
+            }
+            if (+tg.yoy_roas > 0) {
+              const d = Math.round(curRoas - +tg.yoy_roas);
+              cells.push({ l: 'ROAS (작년 동기 대비)', v: (d >= 0 ? '+' : '') + d + '%p', s: `작년 ${fmtNum(+tg.yoy_roas)}%`, c: d >= 0 ? R.ok : R.no });
+            }
+            if (+tg.yoy_revenue > 0) {
+              const base = +tg.yoy_revenue / 30;
+              const g = Math.round((dailyRev / base - 1) * 100);
+              cells.push({ l: '매출 (작년 동기 대비)', v: (g >= 0 ? '+' : '') + g + '%', s: `일평균 기준`, c: g >= 0 ? R.ok : R.no });
+            }
+            if (+tg.yoy_budget > 0 && +tg.daily_budget > 0) {
+              const g = Math.round((+tg.daily_budget / +tg.yoy_budget - 1) * 100);
+              cells.push({ l: '1일 예산 (작년 대비)', v: (g >= 0 ? '+' : '') + g + '%', s: `작년 ${won(+tg.yoy_budget)}/일`, c: R.ink });
+            }
+            return (
+              <div style={{ marginTop: 14, background: '#f7f5ff', border: '1px solid #e4defc', borderRadius: 12, padding: '14px 18px' }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: R.pur, marginBottom: 10 }}>🎯 목표 · 작년 동기(YOY) 비교</div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(140px, 1fr))`, gap: 12 }}>
+                  {cells.map(c => (
+                    <div key={c.l}>
+                      <div style={{ fontSize: 11, color: R.sub, marginBottom: 3 }}>{c.l}</div>
+                      <div style={{ fontSize: 19, fontWeight: 800, color: c.c }}>{c.v}</div>
+                      <div style={{ fontSize: 10.5, color: R.sub, marginTop: 2 }}>{c.s}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* 총평 */}
           <div style={{ marginTop: 20, background: R.soft, border: `1px solid ${R.line}`, borderRadius: 12, padding: '16px 18px' }}>
