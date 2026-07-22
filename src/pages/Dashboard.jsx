@@ -11,6 +11,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { C, RANGES, AD_TYPE_ORDER, AD_TYPE_COLORS } from '../config';
+import PeriodPicker, { NaverCards } from '../components/PeriodPicker';
 import { fmt, fmtWon, fmtNum, filterByRange, aggregateByDate, sumMetrics, calcCtr, calcCpa, calcRoas } from '../utils';
 import { Sparkline } from '../components/Sparkline';
 
@@ -275,9 +276,15 @@ const MemoMetricRow = React.memo(function MetricRow({ label, items, isSubtotal, 
   });
 
 
-export default function Dashboard({ data, allowedBrands, changeRange, rangeLoading }) {
-  const { adData, mappings } = data;
+export default function Dashboard({ data, allowedBrands, changeRange, changeCustomRange, rangeLoading }) {
+  const { adData: adDataAll, mappings } = data;
   const [range, setRange] = useState(7);
+  const [custom, setCustom] = useState(null);          // { from, to } — 기간 지정 모드
+  const [showPicker, setShowPicker] = useState(false);
+  // 기간 지정 시 해당 구간만 사용 (store가 로드한 데이터에서 한 번 더 안전 필터)
+  const adData = useMemo(
+    () => custom ? adDataAll.filter(r => r.date >= custom.from && r.date <= custom.to) : adDataAll,
+    [adDataAll, custom]);
   const [selectedBrand, setSelectedBrand] = useState('전체');
   const [expanded, setExpanded] = useState({});
 
@@ -306,11 +313,37 @@ export default function Dashboard({ data, allowedBrands, changeRange, rangeLoadi
 
   // 기간 변경 시 서버에서 해당 기간 데이터 로드 (selectedBrand는 유지)
   const handleRangeChange = async (newRange) => {
+    setCustom(null); setShowPicker(false);
     setRange(newRange);
     if (changeRange) {
       await changeRange(newRange);
     }
   };
+
+  // 기간 지정 적용
+  const applyCustom = async (from, to) => {
+    setCustom({ from, to });
+    setRange(0);   // 클라이언트 기간 필터는 통과시키고, 위의 custom 필터만 적용
+    if (changeCustomRange) await changeCustomRange(from, to);
+  };
+  const clearCustom = async () => { await handleRangeChange(7); };
+
+  // 기간 지정 요약 (총광고비·구매전환매출액) — 매핑·담당·선택 브랜드 필터 반영
+  const customTotals = useMemo(() => {
+    if (!custom) return null;
+    const mapByKey = {};
+    mappings.forEach(m => { mapByKey[m.match_key] = m; });
+    let cost = 0, rev = 0;
+    adData.forEach(r => {
+      const mp = mapByKey[r.match_key];
+      if (!mp) return;
+      if (allowedBrands && !allowedBrands.includes(mp.brand)) return;
+      if (selectedBrand !== '전체' && mp.brand !== selectedBrand) return;
+      cost += +r.cost || 0;
+      rev += +(r.conv_revenue ?? r.revenue) || 0;
+    });
+    return { cost, rev };
+  }, [custom, adData, mappings, allowedBrands, selectedBrand]);
 
   const handleSort = (key) => {
     if (sortKey === key) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
@@ -430,13 +463,33 @@ export default function Dashboard({ data, allowedBrands, changeRange, rangeLoadi
           {RANGES.map(r => (
             <button key={r.value} onClick={() => handleRangeChange(r.value)} style={{
               padding: '7px 13px', borderRadius: 7, border: 'none', cursor: 'pointer',
-              fontSize: 13, fontWeight: range === r.value ? 600 : 400,
-              background: range === r.value ? C.ac : 'transparent',
-              color: range === r.value ? '#fff' : C.txd,
+              fontSize: 13, fontWeight: !custom && range === r.value ? 600 : 400,
+              background: !custom && range === r.value ? C.ac : 'transparent',
+              color: !custom && range === r.value ? '#fff' : C.txd,
             }}>{r.label}</button>
           ))}
+          <button onClick={() => setShowPicker(s => !s)} style={{
+            padding: '7px 13px', borderRadius: 7, border: 'none', cursor: 'pointer',
+            fontSize: 13, fontWeight: custom ? 700 : 400,
+            background: custom ? C.ac : 'transparent', color: custom ? '#fff' : C.txd,
+          }}>📅 기간 지정</button>
         </div>
       </div>
+
+      {(showPicker || custom) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: C.txd, fontWeight: 600 }}>기간 지정</span>
+          <PeriodPicker value={custom} onApply={applyCustom} onClear={clearCustom} />
+          {custom && <span style={{ fontSize: 11, color: C.txm }}>{custom.from} ~ {custom.to}{Math.round((new Date(custom.to) - new Date(custom.from)) / 86400000) + 1 > 92 ? ' · 92일 초과 기간은 주/월 단위 집계로 표시됩니다' : ''}</span>}
+        </div>
+      )}
+
+      {custom && customTotals && (
+        <NaverCards items={[
+          { label: '총광고비', value: customTotals.cost, unit: '원', color: '#f5a445', sub: `${custom.from} ~ ${custom.to}` },
+          { label: '구매전환매출액', value: customTotals.rev, unit: '원', color: '#5b8def', sub: `ROAS ${customTotals.cost > 0 ? Math.round(customTotals.rev / customTotals.cost * 100) : 0}%` },
+        ]} />
+      )}
 
       {/* 브랜드 선택 */}
       {allBrandNames.length > 1 && (
