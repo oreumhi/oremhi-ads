@@ -135,34 +135,47 @@ function RankTrendChart({ history, ownerId }) {
         if (h.rank != null) mr = Math.max(mr, h.rank);
       }
     });
-    return { dates: ds, series: Object.values(byKey), maxR: Math.min(Math.max(mr, 5), 20) };
+    // 데이터가 있는 구간만 남긴다 (수집 시작 전 빈 날짜가 그래프를 오른쪽으로 몰리게 하는 문제)
+    let ser = Object.values(byKey);
+    let first = -1, last = -1;
+    for (let i = 0; i < ds.length; i++) {
+      if (ser.some(s => s.vals[i] !== undefined)) { if (first < 0) first = i; last = i; }
+    }
+    if (first >= 0 && (first > 0 || last < ds.length - 1)) {
+      const pad = 1;                                  // 양옆 하루씩 여유
+      const a = Math.max(0, first - pad), b = Math.min(ds.length - 1, last + pad);
+      ds = ds.slice(a, b + 1);
+      ser = ser.map(s => ({ ...s, vals: s.vals.slice(a, b + 1) }));
+    }
+    return { dates: ds, series: ser, maxR: Math.min(Math.max(mr, 5), 20) };
   }, [src, adType, brand, days, customR]);
 
   const [focus, setFocus] = useState(null);   // 범례 클릭 시 해당 선만 강조
 
-  // ── 네이버 광고 성과지표 스타일 (블랙 버전): 직선 + 점 + 격자 ──
-  const W = 780, H = 300, PL = 46, PR = 18, PT = 16, PB = 34;
-  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 36, ih = ihAll - missBand;
+  // ── 네이버 성과지표 스타일 (블랙): 가로로 넓고 낮은 비율 + 얇은 선 ──
+  const W = 1000, H = 250, PL = 52, PR = 24, PT = 14, PB = 30;
+  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 30, ih = ihAll - missBand;
   const xAt = (i) => dates.length <= 1 ? PL + iw / 2 : PL + i / (dates.length - 1) * iw;
-  const yAt = (r) => r == null ? PT + ih + missBand - 12 : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
+  const yMiss = PT + ih + missBand - 8;                 // 미노출 라인 y
+  const yAt = (r) => r == null ? yMiss : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
 
-  // Y 눈금 (1위 ~ maxR위, 4단계 내외의 정수 눈금)
+  // Y 눈금 (1위 ~ maxR위, 정수 눈금 4단계 내외)
   const yTicks = useMemo(() => {
     const t = new Set([1, maxR]);
     if (maxR > 4) { t.add(Math.round(1 + (maxR - 1) / 3)); t.add(Math.round(1 + 2 * (maxR - 1) / 3)); }
     else if (maxR > 2) t.add(Math.round((1 + maxR) / 2));
     return [...t].sort((a, b) => a - b);
   }, [maxR]);
-  // X 눈금 (최대 8개, 균등)
+  // X 눈금 (최대 7개, 균등)
   const xTicks = useMemo(() => {
     const n = dates.length;
-    if (n <= 8) return dates.map((_, i) => i);
-    const step = (n - 1) / 7;
-    return Array.from({ length: 8 }, (_, i) => Math.round(i * step));
+    if (n <= 7) return dates.map((_, i) => i);
+    const step = (n - 1) / 6;
+    return Array.from({ length: 7 }, (_, i) => Math.round(i * step));
   }, [dates]);
 
   const hasData = series.some(s => s.vals.some(v => v !== undefined));
-  const GRID = '#232a3d';
+  const GRID = '#212739';
 
   const tabBtn = (on) => ({ ...btnGhost, padding: '5px 13px', fontSize: 12, borderRadius: 999,
     background: on ? C.ac : 'transparent', color: on ? '#fff' : C.txd, borderColor: on ? C.ac : C.bd, fontWeight: on ? 700 : 400, transition: 'all .15s' });
@@ -195,24 +208,25 @@ function RankTrendChart({ history, ownerId }) {
         </div>
       ) : (
         <>
-          <div style={{ background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: '10px 8px 4px' }}>
-            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-              {/* 격자: 가로(순위) + 세로(날짜) */}
-              {yTicks.map(r => (
-                <g key={'y' + r}>
-                  <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={GRID} strokeWidth="1" />
-                  <text x={PL - 10} y={yAt(r) + 4} fontSize="11" fill={C.txd} textAnchor="end" fontWeight="600">{r}위</text>
-                </g>
-              ))}
+          <div style={{ background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: '12px 10px 6px' }}>
+            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
+              style={{ width: '100%', height: 'auto', maxHeight: 300, display: 'block' }}>
+              {/* 세로 격자 */}
               {xTicks.map(i => (
                 <line key={'x' + i} x1={xAt(i)} y1={PT} x2={xAt(i)} y2={PT + ih} stroke={GRID} strokeWidth="1" />
               ))}
+              {/* 가로 격자 + 순위 라벨 */}
+              {yTicks.map(r => (
+                <g key={'y' + r}>
+                  <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={GRID} strokeWidth="1" />
+                  <text x={PL - 9} y={yAt(r) + 3.5} fontSize="10" fill={C.txd} textAnchor="end">{r}위</text>
+                </g>
+              ))}
+              {/* 미노출 라인 — 라벨은 축 왼쪽에 두어 데이터와 겹치지 않게 */}
+              <line x1={PL} y1={yMiss} x2={W - PR} y2={yMiss} stroke={C.no} strokeWidth="1" strokeDasharray="3 4" opacity="0.4" />
+              <text x={PL - 9} y={yMiss + 3.5} fontSize="9.5" fill={C.no} textAnchor="end" opacity="0.75">미노출</text>
 
-              {/* 미노출 존 (하단 구분선) */}
-              <line x1={PL} y1={PT + ih + 10} x2={W - PR} y2={PT + ih + 10} stroke={C.no} strokeWidth="1" strokeDasharray="4 4" opacity="0.5" />
-              <text x={W - PR - 2} y={PT + ih + missBand - 14} fontSize="10.5" fill={C.no} textAnchor="end" opacity="0.9" fontWeight="700">미노출</text>
-
-              {/* 선: 직선 폴리라인 + 각 점 (네이버 스타일) */}
+              {/* 데이터: 얇은 직선 + 작은 점 */}
               {series.map((s, si) => {
                 const color = TREND_COLORS[si % TREND_COLORS.length];
                 const dim = focus !== null && focus !== s.label;
@@ -225,23 +239,24 @@ function RankTrendChart({ history, ownerId }) {
                 });
                 if (cur.length) segs.push(cur);
                 const allPts = segs.flat();
+                const r = hi ? 3 : 2.4;
                 return (
                   <g key={s.label} opacity={dim ? 0.1 : 1} style={{ transition: 'opacity .2s' }}>
                     {segs.map((sg, gi) => sg.length > 1 && (
                       <polyline key={gi} points={sg.map(pt => `${pt[0]},${pt[1]}`).join(' ')}
-                        fill="none" stroke={color} strokeWidth={hi ? 3 : 2}
+                        fill="none" stroke={color} strokeWidth={hi ? 2 : 1.5}
                         strokeLinecap="round" strokeLinejoin="round" />
                     ))}
                     {allPts.map(([px, py, v, di], pi) => v == null
-                      ? <circle key={pi} cx={px} cy={py} r="3.6" fill={C.sf2} stroke={C.no} strokeWidth="1.8"><title>{s.label} · {dates[di]} · 미노출</title></circle>
-                      : <circle key={pi} cx={px} cy={py} r={hi ? 4.4 : 3.6} fill={color} stroke={C.sf2} strokeWidth="1.6"><title>{s.label} · {dates[di]} · {v}위</title></circle>)}
+                      ? <circle key={pi} cx={px} cy={py} r={r} fill="none" stroke={C.no} strokeWidth="1.3" opacity="0.8"><title>{s.label} · {dates[di]} · 미노출</title></circle>
+                      : <circle key={pi} cx={px} cy={py} r={r} fill={color}><title>{s.label} · {dates[di]} · {v}위</title></circle>)}
                   </g>
                 );
               })}
 
-              {/* X축 날짜 (네이버식 m.d 표기) */}
+              {/* X축 날짜 */}
               {xTicks.map(i => (
-                <text key={'xl' + i} x={xAt(i)} y={H - 10} fontSize="10.5" fill={C.txd}
+                <text key={'xl' + i} x={xAt(i)} y={H - 9} fontSize="10" fill={C.txm}
                   textAnchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>
                   {parseInt(dates[i].slice(5, 7), 10)}.{parseInt(dates[i].slice(8, 10), 10)}
                 </text>
