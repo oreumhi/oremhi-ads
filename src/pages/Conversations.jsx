@@ -13,6 +13,7 @@ import { C } from '../config';
 import { fetchUsers, createUser, deleteUser } from '../store';
 import { hashPin } from '../utils';
 import StaffTrend from '../components/StaffTrend';
+import PeriodPicker from '../components/PeriodPicker';
 import {
   parseKakaoExport, guessClientName,
   fetchChatUploads, findPrevUpload, insertChatUpload, deleteChatUpload,
@@ -199,10 +200,15 @@ function ClientScoreBoard({ scores, showStaff }) {
   const [closed, setClosed] = useState({});      // 기본 = 전부 펼침, 클릭하면 개별 접기
   const [pick, setPick] = useState({});          // 광고주별 선택한 기록 id (과거 기록 열람)
   const [staffF, setStaffF] = useState('전체');
+  const [period, setPeriod] = useState(null);    // 기간 지정 { from, to } — 해당 기간의 분석 기록만
   if (scores.length === 0) return <div style={{ color: C.txm, fontSize: 13, padding: 10 }}>아직 분석 결과가 없습니다.</div>;
 
+  const scoped = period
+    ? scores.filter(s => (s.period_end || '') >= period.from && (s.period_end || '') <= period.to)
+    : scores;
+
   const byClient = {};
-  scores.forEach(s => { (byClient[s.client_name] = byClient[s.client_name] || []).push(s); });
+  scoped.forEach(s => { (byClient[s.client_name] = byClient[s.client_name] || []).push(s); });
   let groups = Object.entries(byClient).map(([client, list]) => {
     const hist = [...list].sort((a, b) => (a.period_end || '').localeCompare(b.period_end || ''));
     const latest = hist[hist.length - 1];
@@ -230,10 +236,19 @@ function ClientScoreBoard({ scores, showStaff }) {
 
   return (
     <div>
-      {showStaff && staffNames.length > 2 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
-          {staffNames.map(n => <button key={n} style={chip(staffF === n)} onClick={() => setStaffF(n)}>{n}</button>)}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+        {showStaff && staffNames.length > 2 && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {staffNames.map(n => <button key={n} style={chip(staffF === n)} onClick={() => setStaffF(n)}>{n}</button>)}
+          </div>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11.5, color: C.txd, fontWeight: 600 }}>📅 기간 지정</span>
+          <PeriodPicker value={period} onApply={(f, t) => setPeriod({ from: f, to: t })} onClear={() => setPeriod(null)} />
         </div>
+      </div>
+      {period && groups.length === 0 && (
+        <div style={{ color: C.txm, fontSize: 13, padding: 10 }}>지정 기간({period.from} ~ {period.to})에 분석 기록이 없습니다.</div>
       )}
       {groups.map(g => {
         const gr = gradeOf(g.latest.score_total);
