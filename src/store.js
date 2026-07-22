@@ -523,6 +523,26 @@ export function useStore(currentUser) {
   return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange };
 }
 
+// ─── 브랜드 목표·YOY 기준치 (담당자 기재) ───
+export async function fetchBrandTargets() {
+  if (!sb) return [];
+  const { data, error } = await sb.from('brand_targets').select('*').order('brand');
+  if (error) { console.error('[brand_targets] 조회:', error.message); return []; }
+  return data || [];
+}
+export async function upsertBrandTarget(t) {
+  if (!sb) return false;
+  const { error } = await sb.from('brand_targets').upsert({ ...t, updated_at: new Date().toISOString() });
+  if (error) { console.error('[brand_targets] 저장:', error.message); return false; }
+  return true;
+}
+export async function deleteBrandTarget(brand) {
+  if (!sb) return false;
+  const { error } = await sb.from('brand_targets').delete().eq('brand', brand);
+  if (error) return false;
+  return true;
+}
+
 // ─── 광고주 리포트용 데이터 조회 ───
 export async function fetchAdDataForReport(rangeDays, ownerId) {
   return ownerId ? fetchAdDataByRangeAndOwner(rangeDays, ownerId) : fetchAdDataByRange(rangeDays);
