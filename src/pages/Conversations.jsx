@@ -162,34 +162,168 @@ function Block({ label, text, color }) {
   );
 }
 
-// ─── 점수 테이블 (공용) ───
-function ScoreTable({ scores, showStaff }) {
-  const [openId, setOpenId] = useState(null);
-  if (scores.length === 0) return <div style={{ color: C.txm, fontSize: 13, padding: 10 }}>아직 분석 결과가 없습니다.</div>;
+// ─── 등급 (ⓐ) ───
+const gradeOf = (s) => s >= 60 ? { lb: '양호', color: C.ok, icon: '🟢' }
+  : s >= 40 ? { lb: '보통', color: C.warn, icon: '🟡' }
+  : { lb: '개선 필요', color: C.no, icon: '🔴' };
+
+const daysSinceStr = (dstr) => {
+  try {
+    const t = new Date(); const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    return Math.max(0, Math.round((new Date(today + 'T00:00:00') - new Date(dstr + 'T00:00:00')) / 864e5));
+  } catch { return null; }
+};
+
+// ─── 점수 추이 스파크라인 ───
+function ScoreSpark({ hist }) {
+  if (hist.length < 2) return <div style={{ fontSize: 11.5, color: C.txm, padding: '4px 0 8px' }}>점수 추이는 분석이 2회 이상 쌓이면 그려집니다.</div>;
+  const W = 680, H = 74, PL = 8, PR = 34, PT = 10, PB = 10;
+  const xs = hist.map((h, i) => PL + (W - PL - PR) * (i / (hist.length - 1)));
+  const y = (v) => PT + (H - PT - PB) * (1 - v / 100);
+  const last = hist[hist.length - 1];
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>
-          {showStaff && <th style={th}>담당자</th>}
-          <th style={th}>광고주</th><th style={th}>기간</th><th style={th}>총점</th><th style={th}></th>
-        </tr></thead>
-        <tbody>
-          {scores.map(s => (
-            <React.Fragment key={s.id}>
-              <tr style={{ cursor: 'pointer' }} onClick={() => setOpenId(openId === s.id ? null : s.id)}>
-                {showStaff && <td style={td}>{s.staff_name}</td>}
-                <td style={td}>{s.client_name}</td>
-                <td style={{ ...td, fontSize: 12, color: C.txd }}>{s.period_start} ~ {s.period_end}</td>
-                <td style={{ ...td, fontWeight: 800, fontSize: 15, color: scoreColor(s.score_total) }}>{s.score_total}</td>
-                <td style={{ ...td, fontSize: 11, color: C.txd }}>{openId === s.id ? '▲ 접기' : '▼ 상세'}</td>
-              </tr>
-              {openId === s.id && (
-                <tr><td colSpan={showStaff ? 5 : 4} style={{ padding: 0, border: 'none' }}><ScoreDetail s={s} /></td></tr>
+    <div style={{ background: C.sf3, borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
+      <div style={{ fontSize: 11.5, color: C.txd, marginBottom: 2 }}>점수 추이 (분석 회차별)</div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+        {[40, 60].map(g => <line key={g} x1={PL} y1={y(g)} x2={W - PR} y2={y(g)} stroke={C.bd} strokeDasharray="2 4" />)}
+        <polyline points={hist.map((h, i) => `${xs[i]},${y(h.score_total)}`).join(' ')} fill="none" stroke={C.ac} strokeWidth="2" />
+        {hist.map((h, i) => <circle key={i} cx={xs[i]} cy={y(h.score_total)} r="2.8" fill={scoreColor(h.score_total)}><title>{h.period_end} · {h.score_total}점</title></circle>)}
+        <text x={W - PR + 5} y={y(last.score_total) + 4} fontSize="12" fontWeight="800" fill={scoreColor(last.score_total)}>{last.score_total}</text>
+      </svg>
+    </div>
+  );
+}
+
+// ─── 광고주별 점수판: 최신 상태 1행 + 상세 펼침 (ⓐⓑⓒⓓ) ───
+function ClientScoreBoard({ scores, showStaff }) {
+  const [open, setOpen] = useState(null);        // 펼친 광고주
+  const [pick, setPick] = useState({});          // 광고주별 선택한 기록 id (과거 기록 열람)
+  const [staffF, setStaffF] = useState('전체');
+  if (scores.length === 0) return <div style={{ color: C.txm, fontSize: 13, padding: 10 }}>아직 분석 결과가 없습니다.</div>;
+
+  const byClient = {};
+  scores.forEach(s => { (byClient[s.client_name] = byClient[s.client_name] || []).push(s); });
+  let groups = Object.entries(byClient).map(([client, list]) => {
+    const hist = [...list].sort((a, b) => (a.period_end || '').localeCompare(b.period_end || ''));
+    const latest = hist[hist.length - 1];
+    // 주간 변화: 최신 기준 7일 이전의 가장 가까운 기록과 비교
+    const d = new Date((latest.period_end || '') + 'T00:00:00'); d.setDate(d.getDate() - 7);
+    const weekAgo = isNaN(d) ? '' : d.toISOString().slice(0, 10);
+    const prev = [...hist].reverse().find(h => (h.period_end || '') <= weekAgo);
+    const change = prev ? latest.score_total - prev.score_total : null;
+    // 개선 포인트(ⓒ): 배점 대비 가장 약한 항목
+    let weak = null, wr = 2;
+    CRITERIA.forEach(([lb, key, max]) => {
+      const v = latest[key];
+      if (v == null) return;
+      if (v / max < wr) { wr = v / max; weak = lb; }
+    });
+    const silence = daysSinceStr(latest.period_end);   // 마지막 대화 경과일 (ⓓ)
+    return { client, hist, latest, change, weak, silence };
+  });
+  const staffNames = ['전체', ...new Set(groups.map(g => g.latest.staff_name || '-'))];
+  if (staffF !== '전체') groups = groups.filter(g => (g.latest.staff_name || '-') === staffF);
+  groups.sort((a, b) => a.latest.score_total - b.latest.score_total);   // ⓑ 관리 필요한 순
+
+  const chip = (on) => ({ ...btnGhost, borderRadius: 999, padding: '4px 12px', fontSize: 12,
+    background: on ? C.ac : 'transparent', color: on ? '#fff' : C.txd, borderColor: on ? C.ac : C.bd, fontWeight: on ? 700 : 400 });
+
+  return (
+    <div>
+      {showStaff && staffNames.length > 2 && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+          {staffNames.map(n => <button key={n} style={chip(staffF === n)} onClick={() => setStaffF(n)}>{n}</button>)}
+        </div>
+      )}
+      {groups.map(g => {
+        const gr = gradeOf(g.latest.score_total);
+        const isOpen = open === g.client;
+        const shown = g.hist.find(h => h.id === pick[g.client]) || g.latest;
+        return (
+          <div key={g.client} style={{ border: `1px solid ${isOpen ? C.ac + '66' : C.bd}`, borderRadius: 10, marginBottom: 8, overflow: 'hidden' }}>
+            <div onClick={() => setOpen(isOpen ? null : g.client)}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', cursor: 'pointer', flexWrap: 'wrap', background: isOpen ? C.sf2 : 'transparent' }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: gr.color, background: gr.color + '16', border: `1px solid ${gr.color}44`, borderRadius: 999, padding: '2px 9px', whiteSpace: 'nowrap' }}>{gr.icon} {gr.lb}</span>
+              <span style={{ fontWeight: 800, fontSize: 14 }}>{g.client}</span>
+              {showStaff && <span style={{ fontSize: 11.5, color: C.txd, background: C.sf3, borderRadius: 6, padding: '2px 8px' }}>{g.latest.staff_name || '-'}</span>}
+              <span style={{ fontWeight: 800, fontSize: 17, color: gr.color }}>{g.latest.score_total}<span style={{ fontSize: 11, color: C.txm, fontWeight: 400 }}>점</span></span>
+              {g.change != null && g.change !== 0 && (
+                <span style={{ fontSize: 12, fontWeight: 700, color: g.change > 0 ? C.ok : C.no }}>{g.change > 0 ? '▲' : '▼'}{Math.abs(g.change)} <span style={{ color: C.txm, fontWeight: 400 }}>주간</span></span>
               )}
-            </React.Fragment>
-          ))}
-        </tbody>
-      </table>
+              {g.weak && <span style={{ fontSize: 12, color: C.warn }}>개선 포인트: <b>{g.weak}</b></span>}
+              {g.silence != null && (
+                <span style={{ fontSize: 11.5, color: g.silence >= 14 ? C.no : g.silence >= 7 ? C.warn : C.txm }}>
+                  {g.silence === 0 ? '오늘 대화' : `마지막 대화 ${g.silence}일 전`}{g.silence >= 14 ? ' ⚠' : ''}
+                </span>
+              )}
+              <span style={{ marginLeft: 'auto', fontSize: 11, color: C.txd }}>{isOpen ? '▲ 접기' : '▼ 상세'}</span>
+            </div>
+            {isOpen && (
+              <div style={{ padding: '4px 12px 10px' }}>
+                <ScoreSpark hist={g.hist} />
+                {g.hist.length > 1 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                    <span style={{ fontSize: 11.5, color: C.txd, alignSelf: 'center' }}>분석 기록:</span>
+                    {[...g.hist].reverse().slice(0, 8).map(h => (
+                      <button key={h.id} onClick={() => setPick(p => ({ ...p, [g.client]: h.id }))}
+                        style={{ ...btnGhost, borderRadius: 999, fontSize: 11,
+                          background: shown.id === h.id ? C.ac : 'transparent', color: shown.id === h.id ? '#fff' : C.txd, borderColor: shown.id === h.id ? C.ac : C.bd }}>
+                        {(h.period_end || '').slice(5).replace('-', '.')} · {h.score_total}점
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <ScoreDetail s={shown} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── 업로드 이력: 한 줄 요약 + 펼침 (관리자·직원 공용) ───
+function UploadLog({ uploads, showActions, openContent, removeUpload }) {
+  const [open, setOpen] = useState(false);
+  if (!uploads || uploads.length === 0) return <div style={{ color: C.txm, fontSize: 13 }}>아직 업로드된 파일이 없습니다.</div>;
+  const kstDay = (iso) => iso ? new Date(new Date(iso).getTime() + 9 * 3600e3).toISOString().slice(0, 10) : '';
+  const lastDay = kstDay(uploads[0].created_at);   // uploads는 최신순
+  const lastCnt = uploads.filter(u => kstDay(u.created_at) === lastDay).length;
+  const waitingN = uploads.filter(u => u.status === '대기').length;
+  return (
+    <div>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: waitingN > 0 ? C.warn : C.ok }}>
+          {waitingN > 0 ? '⏳' : '✅'} ~{lastDay} 업로드·분석 {waitingN > 0 ? `진행 중 (대기 ${waitingN}건)` : '완료'}
+        </span>
+        <span style={{ fontSize: 12, color: C.txd }}>마지막 실행 {lastCnt}건 · 누적 {uploads.length}건</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: C.txd }}>{open ? '▲ 접기' : '▼ 상세 보기'}</span>
+      </div>
+      {open && (
+        <div style={{ overflowX: 'auto', marginTop: 10 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><th style={th}>직원</th><th style={th}>광고주</th><th style={th}>분석 기간</th><th style={th}>올린 날짜</th><th style={th}>상태</th>{showActions && <th style={th}></th>}</tr></thead>
+            <tbody>
+              {uploads.slice(0, 60).map(u => (
+                <tr key={u.id}>
+                  <td style={td}>{u.uploader_name}</td>
+                  <td style={td}>{u.client_name}</td>
+                  <td style={{ ...td, fontSize: 12, color: C.txd }}>{u.new_from || u.first_date} ~ {u.last_date}</td>
+                  <td style={{ ...td, fontSize: 12, color: C.txd }}>{kstDay(u.created_at)}</td>
+                  <td style={{ ...td, color: u.status === '완료' ? C.ok : C.warn, fontWeight: 600 }}>{u.status}</td>
+                  {showActions && (
+                    <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                      <button style={btnGhost} onClick={() => openContent(u)}>원문</button>{' '}
+                      <button style={{ ...btnGhost, color: C.no }} onClick={() => removeUpload(u)}>삭제</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -489,30 +623,19 @@ function StaffView({ currentUser }) {
       {/* 내 대화 캘린더 */}
       <CalendarSection isAdmin={false} ownerId={currentUser.id} uploads={uploads} />
 
-      {/* 내 업로드 이력 */}
+      {/* 내 업로드 이력: 한 줄 요약 + 펼침 */}
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>내 업로드 이력</div>
-        {uploads.length === 0 ? <div style={{ color: C.txm, fontSize: 13 }}>아직 업로드한 파일이 없습니다.</div> : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><th style={th}>광고주</th><th style={th}>기간</th><th style={th}>올린 날짜</th><th style={th}>상태</th></tr></thead>
-            <tbody>
-              {uploads.slice(0, 20).map(u => (
-                <tr key={u.id}>
-                  <td style={td}>{u.client_name}</td>
-                  <td style={{ ...td, fontSize: 12, color: C.txd }}>{u.new_from} ~ {u.last_date}</td>
-                  <td style={{ ...td, fontSize: 12, color: C.txd }}>{(u.created_at || '').slice(0, 10)}</td>
-                  <td style={{ ...td, color: u.status === '완료' ? C.ok : C.warn, fontWeight: 600 }}>{u.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <UploadLog uploads={uploads} showActions={false} />
       </div>
 
-      {/* 내 점수 */}
+      {/* 내 점수 — 광고주별 최신 상태 */}
       <div style={card}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>내 대화 품질 점수</div>
-        <ScoreTable scores={scores} showStaff={false} />
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>내 광고주별 대화 품질</div>
+        <div style={{ fontSize: 11.5, color: C.txd, marginBottom: 12 }}>
+          점수가 낮은 광고주가 위로 옵니다 · 행을 누르면 추이와 개선 조언이 열립니다
+        </div>
+        <ClientScoreBoard scores={scores} showStaff={false} />
       </div>
     </div>
   );
@@ -601,34 +724,19 @@ function AdminView({ currentUser }) {
       {/* 대화 캘린더 (전 직원) */}
       <CalendarSection isAdmin={true} ownerId={null} uploads={uploads} staff={staff} />
 
-      {/* 분석 결과 */}
+      {/* 분석 결과 — 광고주별 최신 상태 (점수 낮은 순) */}
       <div style={card}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>대화 품질 점수 (전체)</div>
-        <ScoreTable scores={scores} showStaff={true} />
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>광고주별 대화 품질</div>
+        <div style={{ fontSize: 11.5, color: C.txd, marginBottom: 12 }}>
+          점수가 낮은(먼저 챙길) 광고주가 위로 옵니다 · 🟢 양호 60+ / 🟡 보통 40~59 / 🔴 개선 필요 40 미만 · 행을 누르면 추이와 상세 조언이 열립니다
+        </div>
+        <ClientScoreBoard scores={scores} showStaff={true} />
       </div>
 
-      {/* 업로드 목록 */}
+      {/* 업로드 이력: 한 줄 요약 + 펼침 */}
       <div style={card}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>업로드 파일 관리</div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><th style={th}>직원</th><th style={th}>광고주</th><th style={th}>분석 기간</th><th style={th}>상태</th><th style={th}></th></tr></thead>
-            <tbody>
-              {uploads.slice(0, 50).map(u => (
-                <tr key={u.id}>
-                  <td style={td}>{u.uploader_name}</td>
-                  <td style={td}>{u.client_name}</td>
-                  <td style={{ ...td, fontSize: 12, color: C.txd }}>{u.new_from} ~ {u.last_date}</td>
-                  <td style={{ ...td, color: u.status === '완료' ? C.ok : C.warn, fontWeight: 600 }}>{u.status}</td>
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <button style={btnGhost} onClick={() => openContent(u)}>원문</button>{' '}
-                    <button style={{ ...btnGhost, color: C.no }} onClick={() => removeUpload(u)}>삭제</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>업로드 이력</div>
+        <UploadLog uploads={uploads} showActions={true} openContent={openContent} removeUpload={removeUpload} />
       </div>
 
       {/* 원문 모달 */}
