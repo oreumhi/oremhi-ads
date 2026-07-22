@@ -213,6 +213,8 @@ export default function Report({ currentUser, allowedBrands }) {
   const [ptype, setPtype] = useState('weekly');
   const [channel, setChannel] = useState('search'); // 'search' | 'gfa'
   const [refDate, setRefDate] = useState(addDays(ymd(new Date()), -1));
+  const [cFrom, setCFrom] = useState(addDays(ymd(new Date()), -7));   // 기간 지정 시작
+  const [cTo, setCTo] = useState(addDays(ymd(new Date()), -1));       // 기간 지정 종료
   const [brand, setBrand] = useState('');
   const [agg, setAgg] = useState([]);               // 서버 집계 (브랜드×일자×유형) — 즉시 표시용
   const [detailRows, setDetailRows] = useState([]); // 광고별 상세 (이번 기간만) — 상위/낭비 광고용 지연 로딩
@@ -242,9 +244,19 @@ export default function Report({ currentUser, allowedBrands }) {
   }, [agg, allowedBrands]);
   useEffect(() => { if (!brand && brands.length) setBrand(brands[0]); }, [brands, brand]);
 
-  const P = PERIODS[ptype];
-  const thisFrom = addDays(refDate, -(P.n - 1)), thisTo = refDate;
-  const prevFrom = addDays(refDate, -(2 * P.n - 1)), prevTo = addDays(refDate, -P.n);
+  // 기간 지정(custom) 지원: 지정 구간 + 같은 길이의 직전 구간을 비교
+  const isCustom = ptype === 'custom';
+  const spanC = Math.max(1, Math.round((new Date(cTo) - new Date(cFrom)) / 86400000) + 1);
+  const P = isCustom ? { n: spanC, label: '지정 기간' } : PERIODS[ptype];
+  const thisFrom = isCustom ? cFrom : addDays(refDate, -(P.n - 1));
+  const thisTo = isCustom ? cTo : refDate;
+  const prevFrom = addDays(thisFrom, -P.n), prevTo = addDays(thisFrom, -1);
+
+  // 지정 기간이 기본 로드(70일)보다 과거면 집계를 그만큼 더 불러온다
+  useEffect(() => {
+    const need = Math.round((new Date() - new Date(prevFrom)) / 86400000) + 2;
+    if (need > 70) fetchAdDaily(need, null).then(rows => { if (rows && rows.length) setAgg(rows); });
+  }, [prevFrom]);
 
   useEffect(() => {
     let alive = true;
@@ -448,8 +460,19 @@ export default function Report({ currentUser, allowedBrands }) {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <select value={brand} onChange={e => setBrand(e.target.value)} style={{ ...btn, minWidth: 140 }}>{brands.map(b => <option key={b} value={b}>{b}</option>)}</select>
           <div style={{ display: 'flex', gap: 4 }}>{[['search', '검색광고'], ['gfa', '디스플레이(GFA)']].map(([k, l]) => <button key={k} onClick={() => setChannel(k)} style={channel === k ? btnOn : btn}>{l}</button>)}</div>
-          <div style={{ display: 'flex', gap: 4 }}>{Object.entries(PERIODS).map(([k, v]) => <button key={k} onClick={() => setPtype(k)} style={ptype === k ? btnOn : btn}>{v.label}</button>)}</div>
-          <input type="date" value={refDate} max={ymd(new Date())} onChange={e => setRefDate(e.target.value)} style={btn} />
+          <div style={{ display: 'flex', gap: 4 }}>
+            {Object.entries(PERIODS).map(([k, v]) => <button key={k} onClick={() => setPtype(k)} style={ptype === k ? btnOn : btn}>{v.label}</button>)}
+            <button onClick={() => setPtype('custom')} style={isCustom ? btnOn : btn}>📅 기간 지정</button>
+          </div>
+          {isCustom ? (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="date" value={cFrom} max={ymd(new Date())} onChange={e => setCFrom(e.target.value)} style={btn} />
+              <span style={{ color: '#8890a6', fontSize: 12 }}>→</span>
+              <input type="date" value={cTo} max={ymd(new Date())} onChange={e => setCTo(e.target.value)} style={btn} />
+            </div>
+          ) : (
+            <input type="date" value={refDate} max={ymd(new Date())} onChange={e => setRefDate(e.target.value)} style={btn} />
+          )}
           <div style={{ flex: 1 }} />
           <button onClick={copyKakao} style={btn}>💬 카톡 요약 복사</button>
           <button onClick={() => window.print()} style={btnOn}>🖨️ 인쇄 / PDF</button>
