@@ -15,6 +15,7 @@ export const C = {
 
 // 탭
 export const TABS = [
+  { id: 'home',      label: '홈', icon: '🏠' },
   { id: 'dashboard', label: '성과 보기', icon: '📊' },
   { id: 'overview',  label: '종합 요약', icon: '📈' },
   { id: 'upload',    label: '보고서 업로드', icon: '📤' },
