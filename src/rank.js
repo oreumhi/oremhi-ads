@@ -71,3 +71,28 @@ export async function fetchRankHistory(ownerId, sinceISO) {
   if (error) { console.error('[rank_history] 조회:', error.message); return []; }
   return data || [];
 }
+
+// ─── 경쟁사 레이더 ───
+// 매일 새벽 수집한 검색결과 상위 경쟁 상품/업체 스냅샷.
+export async function fetchRadarDates() {
+  if (!sb) return [];
+  const { data, error } = await sb.from('market_radar').select('date')
+    .order('date', { ascending: false }).limit(3000);
+  if (error) return [];
+  return [...new Set((data || []).map(r => r.date))];
+}
+
+export async function fetchRadar(date) {
+  if (!sb || !date) return [];
+  const { data, error } = await sb.from('market_radar').select('*')
+    .eq('date', date).order('pos', { ascending: true }).limit(3000);
+  if (error) { console.error('[market_radar] 조회:', error.message); return []; }
+  return data || [];
+}
+
+export async function fetchRadarAlerts(date) {
+  if (!sb || !date) return [];
+  const { data, error } = await sb.from('market_radar_alerts').select('*').eq('date', date).limit(500);
+  if (error) return [];
+  return data || [];
+}
