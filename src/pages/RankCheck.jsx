@@ -114,76 +114,138 @@ function RankTrendChart({ history }) {
     return { dates: ds, series: Object.values(byKey), maxR: Math.min(Math.max(mr, 5), 20) };
   }, [history, adType, brand, days]);
 
-  const W = 760, H = 250, PL = 40, PR = 10, PT = 12, PB = 24;
-  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 30, ih = ihAll - missBand;
+  const [focus, setFocus] = useState(null);   // 범례 클릭 시 해당 선만 강조
+
+  const W = 780, H = 280, PL = 46, PR = 16, PT = 18, PB = 30;
+  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 34, ih = ihAll - missBand;
   const xAt = (i) => dates.length <= 1 ? PL + iw / 2 : PL + i / (dates.length - 1) * iw;
-  const yAt = (r) => r == null ? PT + ih + missBand - 8 : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
+  const yAt = (r) => r == null ? PT + ih + missBand - 10 : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
+
+  // 부드러운 곡선 경로 (Catmull-Rom → Bezier)
+  const smooth = (pts) => {
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0][0]} ${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
+    }
+    return d;
+  };
 
   const gridRanks = [...new Set([1, Math.ceil((maxR + 1) / 2), maxR])];
   const hasData = series.some(s => s.vals.some(v => v !== undefined));
 
-  const tabBtn = (on) => ({ ...btnGhost, padding: '5px 12px', fontSize: 12,
-    background: on ? C.ac : 'none', color: on ? '#fff' : C.txd, borderColor: on ? C.ac : C.bd, fontWeight: on ? 700 : 400 });
+  const tabBtn = (on) => ({ ...btnGhost, padding: '5px 13px', fontSize: 12, borderRadius: 999,
+    background: on ? C.ac : 'transparent', color: on ? '#fff' : C.txd, borderColor: on ? C.ac : C.bd, fontWeight: on ? 700 : 400, transition: 'all .15s' });
 
   return (
     <div style={card}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>📈 순위 추이 <span style={{ fontSize: 12, color: C.txd, fontWeight: 400 }}>— 선이 위로 갈수록 상위 노출 (1위가 맨 위)</span></div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>📈 순위 추이 <span style={{ fontSize: 12, color: C.txd, fontWeight: 400 }}>— 위쪽일수록 상위 노출</span></div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {[['shopping', '쇼핑'], ['powerlink', '파워링크']].map(([k, l]) =>
-            <button key={k} style={tabBtn(adType === k)} onClick={() => setAdType(k)}>{l}</button>)}
+            <button key={k} style={tabBtn(adType === k)} onClick={() => { setAdType(k); setFocus(null); }}>{l}</button>)}
           <span style={{ width: 8 }} />
           {[7, 30, 90].map(d => <button key={d} style={tabBtn(days === d)} onClick={() => setDays(d)}>{d}일</button>)}
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
-        {['전체', ...brands].map(b => <button key={b} style={tabBtn(brand === b)} onClick={() => setBrand(b)}>{b}</button>)}
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+        {['전체', ...brands].map(b => <button key={b} style={tabBtn(brand === b)} onClick={() => { setBrand(b); setFocus(null); }}>{b}</button>)}
       </div>
 
       {!hasData ? (
-        <div style={{ fontSize: 13, color: C.txm, padding: 20, textAlign: 'center' }}>이 조건의 추이 데이터가 아직 없습니다. 매일 새벽 수집이 쌓이면 선이 그려집니다.</div>
+        <div style={{ fontSize: 13, color: C.txm, padding: 24, textAlign: 'center' }}>이 조건의 추이 데이터가 아직 없습니다. 매일 새벽 수집이 쌓이면 선이 그려집니다.</div>
       ) : (
         <>
-          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
-            {gridRanks.map(r => (
-              <g key={r}>
-                <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={C.bd} strokeDasharray="3 4" />
-                <text x={PL - 6} y={yAt(r) + 4} fontSize="10" fill={C.txd} textAnchor="end">{r}위</text>
-              </g>
-            ))}
-            <line x1={PL} y1={PT + ih + 10} x2={W - PR} y2={PT + ih + 10} stroke={C.no + '55'} strokeDasharray="2 3" />
-            <text x={PL - 6} y={PT + ih + missBand - 5} fontSize="10" fill={C.no} textAnchor="end">미노출</text>
+          <div style={{ background: 'linear-gradient(180deg, rgba(91,141,239,0.05), rgba(0,0,0,0.12))', border: `1px solid ${C.bd}`, borderRadius: 14, padding: '8px 6px 2px' }}>
+            <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+              <defs>
+                <filter id="rkGlow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="2.4" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <linearGradient id="rkMiss" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(240,112,112,0)" />
+                  <stop offset="100%" stopColor="rgba(240,112,112,0.14)" />
+                </linearGradient>
+              </defs>
+
+              {/* 미노출 존 */}
+              <rect x={PL - 6} y={PT + ih + 8} width={iw + 12} height={missBand - 6} rx="6" fill="url(#rkMiss)" />
+              <text x={W - PR - 4} y={PT + ih + missBand - 12} fontSize="10.5" fill={C.no} textAnchor="end" opacity="0.85" fontWeight="700">미노출</text>
+
+              {/* 그리드 */}
+              {gridRanks.map(r => (
+                <g key={r}>
+                  <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={C.bd} strokeWidth="1" opacity="0.55" />
+                  <text x={PL - 10} y={yAt(r) + 4} fontSize="11" fill={C.txd} textAnchor="end" fontWeight="600">{r}위</text>
+                </g>
+              ))}
+
+              {/* 선 (부드러운 곡선 + 글로우) */}
+              {series.map((s, si) => {
+                const color = TREND_COLORS[si % TREND_COLORS.length];
+                const dim = focus !== null && focus !== s.label;
+                const hi = focus === s.label;
+                const segs = [];
+                let cur = [];
+                s.vals.forEach((v, i) => {
+                  if (v === undefined) { if (cur.length) segs.push(cur); cur = []; }
+                  else cur.push([xAt(i), yAt(v), v, i]);
+                });
+                if (cur.length) segs.push(cur);
+                const allPts = segs.flat();
+                const last = allPts[allPts.length - 1];
+                return (
+                  <g key={s.label} opacity={dim ? 0.12 : 1} style={{ transition: 'opacity .2s' }}>
+                    {segs.map((sg, gi) => sg.length > 1 && (
+                      <path key={gi} d={smooth(sg)} fill="none" stroke={color}
+                        strokeWidth={hi ? 3.2 : 2.2} strokeLinecap="round"
+                        filter={hi ? 'url(#rkGlow)' : undefined} opacity={hi ? 1 : 0.85} />
+                    ))}
+                    {allPts.map(([px, py, v], pi) => v == null
+                      ? <circle key={pi} cx={px} cy={py} r="3.2" fill={C.bg} stroke={C.no} strokeWidth="1.6"><title>{s.label} · {dates[allPts[pi][3]]} · 미노출</title></circle>
+                      : <circle key={pi} cx={px} cy={py} r={hi ? 3.4 : 2.6} fill={color} opacity="0.95"><title>{s.label} · {dates[allPts[pi][3]]} · {v}위</title></circle>)}
+                    {/* 끝점 배지: 현재 순위 */}
+                    {last && (
+                      <g filter={hi ? 'url(#rkGlow)' : undefined}>
+                        <circle cx={last[0]} cy={last[1]} r="5" fill={C.bg} stroke={color} strokeWidth="2.2" />
+                        <circle cx={last[0]} cy={last[1]} r="2" fill={color} />
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* X축 날짜 */}
+              {[0, Math.floor((dates.length - 1) / 2), dates.length - 1].map(i => (
+                <text key={i} x={xAt(i)} y={H - 10} fontSize="10.5" fill={C.txm} textAnchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>
+                  {dates[i].slice(5).replace('-', '.')}</text>
+              ))}
+            </svg>
+          </div>
+
+          {/* 범례: 클릭하면 그 선만 강조 */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
             {series.map((s, si) => {
               const color = TREND_COLORS[si % TREND_COLORS.length];
-              const pts = s.vals.map((v, i) => v === undefined ? null : [xAt(i), yAt(v), v]).filter(Boolean);
-              const segs = [];
-              let cur = [];
-              s.vals.forEach((v, i) => {
-                if (v === undefined) { if (cur.length > 1) segs.push(cur); cur = []; }
-                else cur.push(`${xAt(i)},${yAt(v)}`);
-              });
-              if (cur.length > 1) segs.push(cur);
+              const on = focus === s.label;
+              const lastV = [...s.vals].reverse().find(v => v !== undefined);
               return (
-                <g key={s.label}>
-                  {segs.map((sg, gi) => <polyline key={gi} points={sg.join(' ')} fill="none" stroke={color} strokeWidth="2" opacity="0.9" />)}
-                  {pts.map(([px, py, v], pi) => v == null
-                    ? <circle key={pi} cx={px} cy={py} r="3" fill="none" stroke={C.no} strokeWidth="1.5" />
-                    : <circle key={pi} cx={px} cy={py} r="3" fill={color} />)}
-                </g>
+                <button key={s.label} onClick={() => setFocus(on ? null : s.label)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+                    fontSize: 11.5, border: `1px solid ${on ? color : C.bd}`, background: on ? color + '1c' : 'transparent',
+                    color: on ? C.tx : C.txd, opacity: focus !== null && !on ? 0.45 : 1, transition: 'all .15s' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: color, boxShadow: on ? `0 0 6px ${color}` : 'none' }} />
+                  {s.label}
+                  <b style={{ color: lastV == null ? C.no : color }}>{lastV == null ? '미노출' : lastV + '위'}</b>
+                </button>
               );
             })}
-            {[0, Math.floor((dates.length - 1) / 2), dates.length - 1].map(i => (
-              <text key={i} x={xAt(i)} y={H - 8} fontSize="10" fill={C.txd} textAnchor="middle">{dates[i].slice(5).replace('-', '.')}</text>
-            ))}
-          </svg>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-            {series.map((s, si) => (
-              <span key={s.label} style={{ fontSize: 11.5, color: C.txd }}>
-                <span style={{ color: TREND_COLORS[si % TREND_COLORS.length], fontWeight: 800 }}>—</span> {s.label}
-              </span>
-            ))}
           </div>
-          <div style={{ fontSize: 11, color: C.txm, marginTop: 6 }}>● 채워진 점 = 순위 · ○ 빨간 테두리 점 = 미노출 (아래 띠) · 선이 끊긴 곳 = 그날 수집 없음</div>
+          <div style={{ fontSize: 11, color: C.txm, marginTop: 8 }}>범례를 누르면 해당 광고만 강조됩니다 · 점 위에 마우스를 올리면 날짜·순위가 보입니다 · 선이 끊긴 곳은 수집 없는 날</div>
         </>
       )}
     </div>
