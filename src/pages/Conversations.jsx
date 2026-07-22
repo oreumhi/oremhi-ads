@@ -196,7 +196,7 @@ function ScoreSpark({ hist }) {
 
 // ─── 광고주별 점수판: 최신 상태 1행 + 상세 펼침 (ⓐⓑⓒⓓ) ───
 function ClientScoreBoard({ scores, showStaff }) {
-  const [open, setOpen] = useState(null);        // 펼친 광고주
+  const [closed, setClosed] = useState({});      // 기본 = 전부 펼침, 클릭하면 개별 접기
   const [pick, setPick] = useState({});          // 광고주별 선택한 기록 id (과거 기록 열람)
   const [staffF, setStaffF] = useState('전체');
   if (scores.length === 0) return <div style={{ color: C.txm, fontSize: 13, padding: 10 }}>아직 분석 결과가 없습니다.</div>;
@@ -237,11 +237,11 @@ function ClientScoreBoard({ scores, showStaff }) {
       )}
       {groups.map(g => {
         const gr = gradeOf(g.latest.score_total);
-        const isOpen = open === g.client;
+        const isOpen = !closed[g.client];
         const shown = g.hist.find(h => h.id === pick[g.client]) || g.latest;
         return (
           <div key={g.client} style={{ border: `1px solid ${isOpen ? C.ac + '66' : C.bd}`, borderRadius: 10, marginBottom: 8, overflow: 'hidden' }}>
-            <div onClick={() => setOpen(isOpen ? null : g.client)}
+            <div onClick={() => setClosed(p => ({ ...p, [g.client]: !p[g.client] }))}
               style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', cursor: 'pointer', flexWrap: 'wrap', background: isOpen ? C.sf2 : 'transparent' }}>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: gr.color, background: gr.color + '16', border: `1px solid ${gr.color}44`, borderRadius: 999, padding: '2px 9px', whiteSpace: 'nowrap' }}>{gr.icon} {gr.lb}</span>
               <span style={{ fontWeight: 800, fontSize: 14 }}>{g.client}</span>
