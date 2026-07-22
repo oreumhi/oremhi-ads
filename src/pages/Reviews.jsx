@@ -11,8 +11,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { C } from '../config';
 import { fetchUsers } from '../store';
 import StaffManager from '../components/StaffManager';
+import PeriodPicker from '../components/PeriodPicker';
 import {
-  fetchReviewChecks, fetchReviewDates, fetchReviewStoreMap, setReviewStoreOwner,
+  fetchReviewChecks, fetchReviewChecksRange, fetchReviewDates, fetchReviewStoreMap, setReviewStoreOwner,
   fetchReviewAliases, setProductAlias, setStoreAlias,
   fetchReviewProducts, addReviewProduct, deleteReviewProduct, deleteReviewStore,
 } from '../chat';
@@ -132,6 +133,8 @@ export default function Reviews({ currentUser }) {
   const [adding, setAdding] = useState(null);
   const [newProd, setNewProd] = useState({ name: '', url: '' });
   const [newStore, setNewStore] = useState('');
+  const [period, setPeriod] = useState(null);       // 기간 요약 { from, to }
+  const [periodRows, setPeriodRows] = useState([]); // 기간 내 점검 결과
 
   const loadBase = useCallback(async () => {
     const [ds, al, prods, sm] = await Promise.all([fetchReviewDates(null), fetchReviewAliases(), fetchReviewProducts(), fetchReviewStoreMap()]);
@@ -156,6 +159,14 @@ export default function Reviews({ currentUser }) {
       setResults(Object.fromEntries(rows.map(r => [r.url, r])));
     })();
   }, [date, isAdmin, ownerId]);
+
+  // 기간 요약 로드
+  useEffect(() => {
+    (async () => {
+      if (!period) { setPeriodRows([]); return; }
+      setPeriodRows(await fetchReviewChecksRange(period.from, period.to, isAdmin ? null : ownerId));
+    })();
+  }, [period, isAdmin, ownerId]);
 
   const storeLabel = (s) => alias.stores[s] || s;
   const productLabel = (p) => alias.products[p.url] || p.name || '(이름없음)';
@@ -237,6 +248,10 @@ export default function Reviews({ currentUser }) {
           {dates.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
         <span style={{ fontSize: 12, color: C.txm }}>매장 {stores.length}개 · 상품 {products.filter(p => !p._placeholder).length}개</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 6 }}>
+          <span style={{ fontSize: 12, color: C.txd, fontWeight: 600 }}>📅 기간 요약</span>
+          <PeriodPicker value={period} onApply={(f, t) => setPeriod({ from: f, to: t })} onClear={() => setPeriod(null)} />
+        </span>
         {canEdit && (
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
             <input placeholder="새 업체명" value={newStore} onChange={e => setNewStore(e.target.value)} style={{ ...inpStyle, width: 130 }} onKeyDown={e => e.key === 'Enter' && submitAddStore()} />
@@ -245,13 +260,56 @@ export default function Reviews({ currentUser }) {
         )}
       </div>
 
-      {stores.length === 0 && (
+      {period && (() => {
+        const byS = {};
+        periodRows.forEach(r => {
+          const e = (byS[r.store] = byS[r.store] || { days: new Set(), low: 0, last: '' });
+          e.days.add(r.date); e.low += (+r.low_count || 0);
+          if (r.date > e.last) e.last = r.date;
+        });
+        let rows = Object.entries(byS).filter(([s]) => isAdmin || storeMap[s] === ownerId);
+        rows.sort((a, b) => b[1].low - a[1].low || a[0].localeCompare(b[0], 'ko'));
+        const th = { textAlign: 'left', padding: '6px 10px', fontSize: 11, color: C.txm, fontWeight: 600 };
+        const td = { padding: '8px 10px', fontSize: 12.5, borderTop: `1px solid ${C.bd}` };
+        return (
+          <div style={card}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 3 }}>
+              기간 요약 <span style={{ fontSize: 12, color: C.txd, fontWeight: 400 }}>{period.from} ~ {period.to}</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>기간 내 매장별 점검 결과 합산입니다 · 개별 날짜 상세는 '해제' 후 날짜를 선택해 보세요</div>
+            {rows.length === 0 ? (
+              <div style={{ fontSize: 13, color: C.txm, padding: 12 }}>지정 기간에 점검 기록이 없습니다.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
+                  <thead><tr><th style={th}>매장</th><th style={{ ...th, textAlign: 'right' }}>점검일수</th><th style={{ ...th, textAlign: 'right' }}>저평점 후기 합계</th><th style={th}>마지막 점검일</th><th style={th}>상태</th></tr></thead>
+                  <tbody>
+                    {rows.map(([s, e]) => (
+                      <tr key={s}>
+                        <td style={{ ...td, fontWeight: 700 }}>{storeLabel(s)}</td>
+                        <td style={{ ...td, textAlign: 'right' }}>{e.days.size}일</td>
+                        <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: e.low > 0 ? C.no : C.ok }}>{e.low}건</td>
+                        <td style={{ ...td, color: C.txd }}>{e.last}</td>
+                        <td style={td}>{e.low > 0
+                          ? <span style={{ color: C.no, fontWeight: 700 }}>⚠ 대응 필요</span>
+                          : <span style={{ color: C.ok }}>✅ 이상 없음</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {!period && stores.length === 0 && (
         <div style={{ ...card, textAlign: 'center', color: C.txm, fontSize: 13, padding: 40 }}>
           {isAdmin ? '등록된 매장이 없습니다. 위에서 매장을 추가하세요.' : '담당 매장이 없습니다. 대표님이 매장 담당을 지정하면 표시됩니다.'}
         </div>
       )}
 
-      {stores.map(store => {
+      {!period && stores.map(store => {
         const items = (byStore[store] || []).filter(p => !p._placeholder).slice()
           .sort((a, b) => (productLabel(a) || '').localeCompare(productLabel(b) || '', 'ko', { numeric: true }));
         let lowTotal = 0, anyResult = false;
