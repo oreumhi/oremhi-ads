@@ -28,6 +28,13 @@ async function fetchPagedParallel(makeQuery, wave = 6) {
     const results = await Promise.all(
       Array.from({ length: wave }, (_, i) => makeQuery(page + i, PAGE_SIZE))
     );
+    // 일시 오류(타임아웃 등)는 그 페이지만 잠시 후 1회 재시도 — 조용한 부분 유실 방지
+    for (let i = 0; i < results.length; i++) {
+      if (results[i] && results[i].error) {
+        await new Promise(r => setTimeout(r, 800));
+        results[i] = await makeQuery(page + i, PAGE_SIZE);
+      }
+    }
     page += wave;
     let done = false;
     for (const { data, error } of results) {
