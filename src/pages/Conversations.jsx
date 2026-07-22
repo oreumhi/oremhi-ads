@@ -523,12 +523,15 @@ function AdminView({ currentUser }) {
   const [uploads, setUploads] = useState([]);
   const [scores, setScores] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [assignees, setAssignees] = useState([]);
   const [viewContent, setViewContent] = useState(null); // {name, text}
 
   const load = useCallback(async () => {
     const [u, s, users] = await Promise.all([fetchChatUploads(null), fetchChatScores(null), fetchUsers()]);
     setUploads(u); setScores(s);
     setStaff(users.filter(x => x.role === 'staff'));
+    setAssignees(users.filter(x => x.role === 'admin' || x.role === 'staff')
+      .sort((a, b) => (a.role === 'admin' ? -1 : 1) - (b.role === 'admin' ? -1 : 1)));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -568,7 +571,7 @@ function AdminView({ currentUser }) {
       <UploadSection currentUser={currentUser} isAdmin={true} staff={staff} onDone={load} />
 
       {/* 자동수집 방 담당자 지정 */}
-      <RoomOwnerSection staff={staff} onChanged={load} />
+      <RoomOwnerSection staff={staff} assignees={assignees} onChanged={load} />
 
       {/* 직원별 제출 현황 */}
       <div style={card}>
@@ -647,7 +650,8 @@ function AdminView({ currentUser }) {
 }
 
 // 카톡 "대화 분석" 폴더에서 자동수집된 방 목록 + 담당자 지정(그때그때→기억)
-function RoomOwnerSection({ staff, onChanged }) {
+function RoomOwnerSection({ staff, assignees, onChanged }) {
+  const people = (assignees && assignees.length ? assignees : staff);   // 담당 후보 = 대표 + 직원
   const [rooms, setRooms] = useState([]);
   const [busy, setBusy] = useState('');
   const [ns, setNs] = useState({ name: '', username: '', password: '' });
@@ -689,7 +693,7 @@ function RoomOwnerSection({ staff, onChanged }) {
 
   const assign = async (room, ownerId) => {
     setBusy(room.room_name);
-    const person = (staff || []).find(u => u.id === ownerId);
+    const person = (people || []).find(u => u.id === ownerId);
     await setChatRoomOwner(room.room_name, ownerId || null, person ? person.name : null, room.client_name);
     await load(); onChanged && onChanged(); setBusy('');
   };
@@ -746,7 +750,7 @@ function RoomOwnerSection({ staff, onChanged }) {
                   <select style={selStyle} disabled={busy === r.room_name}
                     value={r.owner_id || ''} onChange={e => assign(r, e.target.value)}>
                     <option value="">— 미지정 —</option>
-                    {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    {(people || []).map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'admin' ? ' (대표)' : ''}</option>)}
                   </select>
                 </td>
                 <td style={td}>
