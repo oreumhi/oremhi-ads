@@ -223,7 +223,7 @@ function HeroHeader({ adData, allowedBrands, userName }) {
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
         {box('광고비', won(m1.cost), delta(m1.cost, m2.cost))}
         {box('매출(전환)', won(m1.rev), delta(m1.rev, m2.rev))}
-        {box('ROAS', (r1 / 100).toFixed(2) + '배', r2 > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: r1 >= r2 ? C.ok : C.no }}>{r1 >= r2 ? '▲' : '▼'} {(Math.abs(r1 - r2) / 100).toFixed(2)}배</span> : null)}
+        {box('ROAS', Math.round(r1) + '%', r2 > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: r1 >= r2 ? C.ok : C.no }}>{r1 >= r2 ? '▲' : '▼'} {Math.round(Math.abs(r1 - r2))}%p</span> : null)}
         {box('전환수', fmtNum(m1.conv) + '건', delta(m1.conv, m2.conv))}
       </div>
     </div>
@@ -300,7 +300,7 @@ function SignalBoard({ rows }) {
                 <td style={{ padding: '8px 8px', fontSize: 12.5, color: C.tx, fontWeight: 700, whiteSpace: 'nowrap' }}>{r.brand}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.cost > 0 ? won(r.cost) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.rev > 0 ? won(r.rev) : <span style={{ color: C.txm }}>—</span>}</td>
-                <td style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: r.cost > 0 ? (r.roas >= 300 ? C.ok : r.roas >= 100 ? C.tx : C.no) : C.txm }}>{r.cost > 0 ? (r.roas / 100).toFixed(2) + '배' : '—'}</td>
+                <td style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: r.cost > 0 ? (r.roas >= 300 ? C.ok : r.roas >= 100 ? C.tx : C.no) : C.txm }}>{r.cost > 0 ? Math.round(r.roas) + '%' : '—'}</td>
                 {['perf', 'chat', 'review', 'rank'].map(k => (
                   <td key={k} style={{ padding: '8px 6px', textAlign: 'center' }}><Dot color={G[r[k].s]} title={r[k].t} /></td>
                 ))}
@@ -488,10 +488,10 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
         } else if (pRoas > 50 && rec.cost > 30000 && rRoas < pRoas * 0.7) {
           // 하락 후에도 ROAS 4배 이상이면 '주의', 그 아래면 '긴급'
           const stillGood = rRoas >= 400;
-          perf = { s: stillGood ? 'yellow' : 'red', t: `ROAS 하락 ${(pRoas / 100).toFixed(1)}배→${(rRoas / 100).toFixed(1)}배` };
-          if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${(pRoas / 100).toFixed(2)}배 → ${(rRoas / 100).toFixed(2)}배`, tab: 'overview' });
+          perf = { s: stillGood ? 'yellow' : 'red', t: `ROAS 하락 ${Math.round(pRoas)}%→${Math.round(rRoas)}%` };
+          if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${Math.round(pRoas)}% → ${Math.round(rRoas)}%`, tab: 'overview' });
         } else if (pRoas > 50 && rRoas < pRoas * 0.85) {
-          perf = { s: 'yellow', t: `ROAS 완만한 하락 (${(rRoas / 100).toFixed(2)}배)` };
+          perf = { s: 'yellow', t: `ROAS 완만한 하락 (${Math.round(rRoas)}%)` };
         }
       }
       // 대화 신호
