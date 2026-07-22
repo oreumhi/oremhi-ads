@@ -9,6 +9,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { C } from '../config';
 import { fetchUsers } from '../store';
 import StaffManager from '../components/StaffManager';
+import PeriodPicker from '../components/PeriodPicker';
 import {
   fetchRankProducts, addRankProduct, deleteRankProduct, setRankOwner, updateRankProduct,
   fetchRankHistory,
@@ -83,59 +84,85 @@ function RankResultsTable({ history, showStaff }) {
 const TREND_COLORS = ['#5b8def', '#3dd9a0', '#f5a445', '#ed6ea0', '#9d7ff0', '#45c8dc', '#f0c746', '#f07070', '#8fd14f', '#c9a227'];
 const isShopT = (t) => t === 'shopping' || t === '쇼핑';
 
-function RankTrendChart({ history }) {
+function RankTrendChart({ history, ownerId }) {
   const [adType, setAdType] = useState('shopping');
   const [brand, setBrand] = useState('전체');
   const [days, setDays] = useState(30);
+  const [customR, setCustomR] = useState(null);      // { from, to } — 기간 지정
+  const [showPicker, setShowPicker] = useState(false);
+  const [extHistory, setExtHistory] = useState(null); // 기간 지정 시 별도 로드 (90일 이전 포함)
 
+  useEffect(() => {
+    if (!customR) { setExtHistory(null); return; }
+    let alive = true;
+    fetchRankHistory(ownerId || null, customR.from + 'T00:00:00')
+      .then(h => { if (alive) setExtHistory(h || []); });
+    return () => { alive = false; };
+  }, [customR, ownerId]);
+
+  const src = customR ? (extHistory || []) : history;
   const brands = useMemo(() => [...new Set(history.map(h => h.brand).filter(Boolean))].sort(), [history]);
 
   const { dates, series, maxR } = useMemo(() => {
-    const today = new Date();
-    const ds = Array.from({ length: days }, (_, i) => {
-      const d = new Date(today); d.setDate(d.getDate() - (days - 1 - i));
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    });
+    let ds;
+    if (customR) {
+      ds = [];
+      const cur = new Date(customR.from + 'T00:00:00');
+      const endD = new Date(customR.to + 'T00:00:00');
+      while (cur <= endD && ds.length < 366) {
+        ds.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`);
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else {
+      const today = new Date();
+      ds = Array.from({ length: days }, (_, i) => {
+        const d = new Date(today); d.setDate(d.getDate() - (days - 1 - i));
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      });
+    }
     const idx = Object.fromEntries(ds.map((d, i) => [d, i]));
     const byKey = {};
     let mr = 5;
-    history.forEach(h => {
+    src.forEach(h => {
       if (adType === 'shopping' ? !isShopT(h.ad_type) : isShopT(h.ad_type)) return;
       if (brand !== '전체' && h.brand !== brand) return;
       const day = (h.collected_at || '').slice(0, 10);
       if (!(day in idx)) return;
       const k = `${h.brand}·${h.product || ''}·${h.keyword}`;
-      const s = (byKey[k] = byKey[k] || { label: k, vals: Array(days).fill(undefined) });
+      const s = (byKey[k] = byKey[k] || { label: k, vals: Array(ds.length).fill(undefined) });
       if (s.vals[idx[day]] === undefined) {   // history는 최신순 → 하루 중 최신값 유지
         s.vals[idx[day]] = h.rank;            // null = 미노출
         if (h.rank != null) mr = Math.max(mr, h.rank);
       }
     });
     return { dates: ds, series: Object.values(byKey), maxR: Math.min(Math.max(mr, 5), 20) };
-  }, [history, adType, brand, days]);
+  }, [src, adType, brand, days, customR]);
 
   const [focus, setFocus] = useState(null);   // 범례 클릭 시 해당 선만 강조
 
-  const W = 780, H = 280, PL = 46, PR = 16, PT = 18, PB = 30;
-  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 34, ih = ihAll - missBand;
+  // ── 네이버 광고 성과지표 스타일 (블랙 버전): 직선 + 점 + 격자 ──
+  const W = 780, H = 300, PL = 46, PR = 18, PT = 16, PB = 34;
+  const iw = W - PL - PR, ihAll = H - PT - PB, missBand = 36, ih = ihAll - missBand;
   const xAt = (i) => dates.length <= 1 ? PL + iw / 2 : PL + i / (dates.length - 1) * iw;
-  const yAt = (r) => r == null ? PT + ih + missBand - 10 : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
+  const yAt = (r) => r == null ? PT + ih + missBand - 12 : PT + (Math.min(r, maxR) - 1) / Math.max(1, maxR - 1) * ih;
 
-  // 부드러운 곡선 경로 (Catmull-Rom → Bezier)
-  const smooth = (pts) => {
-    if (pts.length < 2) return '';
-    let d = `M ${pts[0][0]} ${pts[0][1]}`;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
-      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
-      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
-      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
-    }
-    return d;
-  };
+  // Y 눈금 (1위 ~ maxR위, 4단계 내외의 정수 눈금)
+  const yTicks = useMemo(() => {
+    const t = new Set([1, maxR]);
+    if (maxR > 4) { t.add(Math.round(1 + (maxR - 1) / 3)); t.add(Math.round(1 + 2 * (maxR - 1) / 3)); }
+    else if (maxR > 2) t.add(Math.round((1 + maxR) / 2));
+    return [...t].sort((a, b) => a - b);
+  }, [maxR]);
+  // X 눈금 (최대 8개, 균등)
+  const xTicks = useMemo(() => {
+    const n = dates.length;
+    if (n <= 8) return dates.map((_, i) => i);
+    const step = (n - 1) / 7;
+    return Array.from({ length: 8 }, (_, i) => Math.round(i * step));
+  }, [dates]);
 
-  const gridRanks = [...new Set([1, Math.ceil((maxR + 1) / 2), maxR])];
   const hasData = series.some(s => s.vals.some(v => v !== undefined));
+  const GRID = '#232a3d';
 
   const tabBtn = (on) => ({ ...btnGhost, padding: '5px 13px', fontSize: 12, borderRadius: 999,
     background: on ? C.ac : 'transparent', color: on ? '#fff' : C.txd, borderColor: on ? C.ac : C.bd, fontWeight: on ? 700 : 400, transition: 'all .15s' });
@@ -144,47 +171,48 @@ function RankTrendChart({ history }) {
     <div style={card}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>📈 순위 추이 <span style={{ fontSize: 12, color: C.txd, fontWeight: 400 }}>— 위쪽일수록 상위 노출</span></div>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           {[['shopping', '쇼핑'], ['powerlink', '파워링크']].map(([k, l]) =>
             <button key={k} style={tabBtn(adType === k)} onClick={() => { setAdType(k); setFocus(null); }}>{l}</button>)}
           <span style={{ width: 8 }} />
-          {[7, 30, 90].map(d => <button key={d} style={tabBtn(days === d)} onClick={() => setDays(d)}>{d}일</button>)}
+          {[7, 30, 90].map(d => <button key={d} style={tabBtn(!customR && days === d)} onClick={() => { setCustomR(null); setShowPicker(false); setDays(d); }}>{d}일</button>)}
+          <button style={tabBtn(!!customR)} onClick={() => setShowPicker(s => !s)}>📅 기간 지정</button>
         </div>
       </div>
+      {(showPicker || customR) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: '9px 12px', marginBottom: 10 }}>
+          <PeriodPicker value={customR} onApply={(f, t) => { setCustomR({ from: f, to: t }); setFocus(null); }} onClear={() => { setCustomR(null); setShowPicker(false); }} />
+          {customR && extHistory === null && <span style={{ fontSize: 11.5, color: C.txd }}>기간 데이터 불러오는 중…</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
         {['전체', ...brands].map(b => <button key={b} style={tabBtn(brand === b)} onClick={() => { setBrand(b); setFocus(null); }}>{b}</button>)}
       </div>
 
       {!hasData ? (
-        <div style={{ fontSize: 13, color: C.txm, padding: 24, textAlign: 'center' }}>이 조건의 추이 데이터가 아직 없습니다. 매일 새벽 수집이 쌓이면 선이 그려집니다.</div>
+        <div style={{ fontSize: 13, color: C.txm, padding: 24, textAlign: 'center' }}>
+          {customR && extHistory === null ? '기간 데이터를 불러오는 중…' : '이 조건의 추이 데이터가 아직 없습니다. 매일 새벽 수집이 쌓이면 선이 그려집니다.'}
+        </div>
       ) : (
         <>
-          <div style={{ background: 'linear-gradient(180deg, rgba(91,141,239,0.05), rgba(0,0,0,0.12))', border: `1px solid ${C.bd}`, borderRadius: 14, padding: '8px 6px 2px' }}>
+          <div style={{ background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: '10px 8px 4px' }}>
             <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-              <defs>
-                <filter id="rkGlow" x="-30%" y="-30%" width="160%" height="160%">
-                  <feGaussianBlur stdDeviation="2.4" result="b" />
-                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-                </filter>
-                <linearGradient id="rkMiss" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="rgba(240,112,112,0)" />
-                  <stop offset="100%" stopColor="rgba(240,112,112,0.14)" />
-                </linearGradient>
-              </defs>
-
-              {/* 미노출 존 */}
-              <rect x={PL - 6} y={PT + ih + 8} width={iw + 12} height={missBand - 6} rx="6" fill="url(#rkMiss)" />
-              <text x={W - PR - 4} y={PT + ih + missBand - 12} fontSize="10.5" fill={C.no} textAnchor="end" opacity="0.85" fontWeight="700">미노출</text>
-
-              {/* 그리드 */}
-              {gridRanks.map(r => (
-                <g key={r}>
-                  <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={C.bd} strokeWidth="1" opacity="0.55" />
+              {/* 격자: 가로(순위) + 세로(날짜) */}
+              {yTicks.map(r => (
+                <g key={'y' + r}>
+                  <line x1={PL} y1={yAt(r)} x2={W - PR} y2={yAt(r)} stroke={GRID} strokeWidth="1" />
                   <text x={PL - 10} y={yAt(r) + 4} fontSize="11" fill={C.txd} textAnchor="end" fontWeight="600">{r}위</text>
                 </g>
               ))}
+              {xTicks.map(i => (
+                <line key={'x' + i} x1={xAt(i)} y1={PT} x2={xAt(i)} y2={PT + ih} stroke={GRID} strokeWidth="1" />
+              ))}
 
-              {/* 선 (부드러운 곡선 + 글로우) */}
+              {/* 미노출 존 (하단 구분선) */}
+              <line x1={PL} y1={PT + ih + 10} x2={W - PR} y2={PT + ih + 10} stroke={C.no} strokeWidth="1" strokeDasharray="4 4" opacity="0.5" />
+              <text x={W - PR - 2} y={PT + ih + missBand - 14} fontSize="10.5" fill={C.no} textAnchor="end" opacity="0.9" fontWeight="700">미노출</text>
+
+              {/* 선: 직선 폴리라인 + 각 점 (네이버 스타일) */}
               {series.map((s, si) => {
                 const color = TREND_COLORS[si % TREND_COLORS.length];
                 const dim = focus !== null && focus !== s.label;
@@ -197,32 +225,26 @@ function RankTrendChart({ history }) {
                 });
                 if (cur.length) segs.push(cur);
                 const allPts = segs.flat();
-                const last = allPts[allPts.length - 1];
                 return (
-                  <g key={s.label} opacity={dim ? 0.12 : 1} style={{ transition: 'opacity .2s' }}>
+                  <g key={s.label} opacity={dim ? 0.1 : 1} style={{ transition: 'opacity .2s' }}>
                     {segs.map((sg, gi) => sg.length > 1 && (
-                      <path key={gi} d={smooth(sg)} fill="none" stroke={color}
-                        strokeWidth={hi ? 3.2 : 2.2} strokeLinecap="round"
-                        filter={hi ? 'url(#rkGlow)' : undefined} opacity={hi ? 1 : 0.85} />
+                      <polyline key={gi} points={sg.map(pt => `${pt[0]},${pt[1]}`).join(' ')}
+                        fill="none" stroke={color} strokeWidth={hi ? 3 : 2}
+                        strokeLinecap="round" strokeLinejoin="round" />
                     ))}
-                    {allPts.map(([px, py, v], pi) => v == null
-                      ? <circle key={pi} cx={px} cy={py} r="3.2" fill={C.bg} stroke={C.no} strokeWidth="1.6"><title>{s.label} · {dates[allPts[pi][3]]} · 미노출</title></circle>
-                      : <circle key={pi} cx={px} cy={py} r={hi ? 3.4 : 2.6} fill={color} opacity="0.95"><title>{s.label} · {dates[allPts[pi][3]]} · {v}위</title></circle>)}
-                    {/* 끝점 배지: 현재 순위 */}
-                    {last && (
-                      <g filter={hi ? 'url(#rkGlow)' : undefined}>
-                        <circle cx={last[0]} cy={last[1]} r="5" fill={C.bg} stroke={color} strokeWidth="2.2" />
-                        <circle cx={last[0]} cy={last[1]} r="2" fill={color} />
-                      </g>
-                    )}
+                    {allPts.map(([px, py, v, di], pi) => v == null
+                      ? <circle key={pi} cx={px} cy={py} r="3.6" fill={C.sf2} stroke={C.no} strokeWidth="1.8"><title>{s.label} · {dates[di]} · 미노출</title></circle>
+                      : <circle key={pi} cx={px} cy={py} r={hi ? 4.4 : 3.6} fill={color} stroke={C.sf2} strokeWidth="1.6"><title>{s.label} · {dates[di]} · {v}위</title></circle>)}
                   </g>
                 );
               })}
 
-              {/* X축 날짜 */}
-              {[0, Math.floor((dates.length - 1) / 2), dates.length - 1].map(i => (
-                <text key={i} x={xAt(i)} y={H - 10} fontSize="10.5" fill={C.txm} textAnchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>
-                  {dates[i].slice(5).replace('-', '.')}</text>
+              {/* X축 날짜 (네이버식 m.d 표기) */}
+              {xTicks.map(i => (
+                <text key={'xl' + i} x={xAt(i)} y={H - 10} fontSize="10.5" fill={C.txd}
+                  textAnchor={i === 0 ? 'start' : i === dates.length - 1 ? 'end' : 'middle'}>
+                  {parseInt(dates[i].slice(5, 7), 10)}.{parseInt(dates[i].slice(8, 10), 10)}
+                </text>
               ))}
             </svg>
           </div>
@@ -238,7 +260,7 @@ function RankTrendChart({ history }) {
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
                     fontSize: 11.5, border: `1px solid ${on ? color : C.bd}`, background: on ? color + '1c' : 'transparent',
                     color: on ? C.tx : C.txd, opacity: focus !== null && !on ? 0.45 : 1, transition: 'all .15s' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 99, background: color, boxShadow: on ? `0 0 6px ${color}` : 'none' }} />
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: color }} />
                   {s.label}
                   <b style={{ color: lastV == null ? C.no : color }}>{lastV == null ? '미노출' : lastV + '위'}</b>
                 </button>
@@ -381,7 +403,7 @@ export default function RankCheck({ currentUser }) {
       {isAdmin && <StaffManager staff={staff} onChanged={load} />}
       {isAdmin && <TargetManager staff={assignees} onChanged={load} />}
 
-      {!loading && <RankTrendChart history={history} />}
+      {!loading && <RankTrendChart history={history} ownerId={isAdmin ? null : currentUser?.id} />}
 
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{isAdmin ? '최신 순위 (전체)' : '내 최신 순위'}</div>
