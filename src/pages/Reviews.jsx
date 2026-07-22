@@ -124,6 +124,7 @@ export default function Reviews({ currentUser }) {
   const [results, setResults] = useState({});
   const [products, setProducts] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [assignees, setAssignees] = useState([]);
   const [storeMap, setStoreMap] = useState({});
   const [alias, setAlias] = useState({ products: {}, stores: {} });
   const [loading, setLoading] = useState(true);
@@ -140,6 +141,9 @@ export default function Reviews({ currentUser }) {
     if (isAdmin) {
       const users = await fetchUsers();
       setStaff(users.filter(u => u.role === 'staff'));
+      // 담당 지정 후보 = 관리자(대표) + 직원
+      setAssignees(users.filter(u => u.role === 'admin' || u.role === 'staff')
+        .sort((a, b) => (a.role === 'admin' ? -1 : 1) - (b.role === 'admin' ? -1 : 1)));
     }
     setLoading(false);
   }, [isAdmin]);
@@ -273,7 +277,7 @@ export default function Reviews({ currentUser }) {
                     <span style={{ fontSize: 11, color: C.txd }}>담당</span>
                     <select value={storeMap[store] || ''} onChange={e => assignOwner(store, e.target.value)} style={selStyle}>
                       <option value="">미지정(전체)</option>
-                      {staff.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {assignees.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'admin' ? ' (대표)' : ''}</option>)}
                     </select>
                   </span>
                 )}
