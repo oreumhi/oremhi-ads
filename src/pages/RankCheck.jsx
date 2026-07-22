@@ -10,6 +10,7 @@ import { C } from '../config';
 import { fetchUsers } from '../store';
 import StaffManager from '../components/StaffManager';
 import PeriodPicker from '../components/PeriodPicker';
+import CompetitorRadar from '../components/CompetitorRadar';
 import {
   fetchRankProducts, addRankProduct, deleteRankProduct, setRankOwner, updateRankProduct,
   fetchRankHistory,
@@ -382,7 +383,7 @@ function TargetManager({ staff, onChanged }) {
   );
 }
 
-export default function RankCheck({ currentUser }) {
+export default function RankCheck({ currentUser, allowedBrands }) {
   const isAdmin = currentUser?.role === 'admin';
   const [history, setHistory] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -419,6 +420,8 @@ export default function RankCheck({ currentUser }) {
       {isAdmin && <TargetManager staff={assignees} onChanged={load} />}
 
       {!loading && <RankTrendChart history={history} ownerId={isAdmin ? null : currentUser?.id} />}
+
+      <CompetitorRadar allowedBrands={isAdmin ? null : allowedBrands} />
 
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{isAdmin ? '최신 순위 (전체)' : '내 최신 순위'}</div>
