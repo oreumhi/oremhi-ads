@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
-import { sb, fetchAdDaily, fetchUsers, fetchBrandTargets } from '../store';
+import { sb, fetchAdDaily, fetchAdDailyWindow, fetchUsers, fetchBrandTargets } from '../store';
 import { fetchTodayPromises, fetchOpenPerfAlerts, fetchReportsByDate, fetchOpenActions, fetchEventsRange } from '../team';
 import { fetchChatScores, fetchChatUploads, fetchReviewChecks, fetchReviewStoreMap } from '../chat';
 import { fetchRankHistory, fetchRankProducts } from '../rank';
@@ -302,9 +302,9 @@ function SignalBoard({ rows }) {
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.cost > 0 ? won(r.cost) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.rev > 0 ? won(r.rev) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: r.cost > 0 ? (r.roas >= 300 ? C.ok : r.roas >= 100 ? C.tx : C.no) : C.txm }}>{r.cost > 0 ? Math.round(r.roas) + '%' : '—'}</td>
-                <td title={r.goal ? `목표 ROAS ${fmtNum(r.goal.target)}% 기준 · 최근 7일${r.goal.yoyDiff != null ? ` · 작년 동기 대비 ${r.goal.yoyDiff >= 0 ? '+' : ''}${r.goal.yoyDiff}%p` : ''}` : '목표 미기재 (설정 → 브랜드 목표 관리)'}
-                  style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: !r.goal ? C.txm : r.goal.rate >= 100 ? C.ok : r.goal.rate >= 90 ? C.yel : C.no }}>
-                  {r.goal ? r.goal.rate + '%' : '—'}
+                <td title={(r.goal && r.goal.target ? `목표 ROAS ${fmtNum(r.goal.target)}% 기준 · 최근 7일` : '목표 미기재 (설정 → 브랜드 목표 관리)') + (r.goal && r.goal.yoyDiff != null ? ` · 작년 동기 대비 ${r.goal.yoyDiff >= 0 ? '+' : ''}${r.goal.yoyDiff}%p (작년 데이터 자동 비교)` : '')}
+                  style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: !(r.goal && r.goal.rate != null) ? C.txm : r.goal.rate >= 100 ? C.ok : r.goal.rate >= 90 ? C.yel : C.no }}>
+                  {r.goal && r.goal.rate != null ? r.goal.rate + '%' : '—'}
                   {r.goal && r.goal.yoyDiff != null && (
                     <span style={{ fontSize: 9.5, marginLeft: 4, color: r.goal.yoyDiff >= 0 ? C.ok : C.no, fontWeight: 600 }}>
                       YOY{r.goal.yoyDiff >= 0 ? '▲' : '▼'}
@@ -427,13 +427,15 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
         sb ? sb.from('job_heartbeat').select('*') : { data: [] },
       ]);
       const targets = await fetchBrandTargets();
+      // 작년 동기 7일 (YOY 자동 계산 — 작년 보고서 데이터 기반)
+      const lyAd = await fetchAdDailyWindow(addDays(t, -373), addDays(t, -364));
       setD({
         ad: ad || [], promises: promises || [], perfAlerts: perfAlerts || [],
         chatScores: chatScores || [], chatUploads: chatUploads || [],
         reviewsToday: reviewsToday || [], storeMap: storeMap || [],
         rankHist: rankHist || [], rankProds: rankProds || [],
         users: users || [], reports: reports || [], actions: actions || [], events: events || [],
-        radar: radarRes.data || [], hb: hbRes.data || [], targets: targets || [],
+        radar: radarRes.data || [], hb: hbRes.data || [], targets: targets || [], lyAd: lyAd || [],
       });
       setLoading(false);
     })();
@@ -490,6 +492,14 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     // 브랜드 목표 (담당자 기재 — 설정의 '브랜드 목표 관리')
     const targetBy = {};
     (D.targets || []).forEach(x => { targetBy[x.brand] = x; });
+    // 작년 동기 7일 브랜드별 합계 (YOY 자동)
+    const lyBy = {};
+    const lyS = addDays(t, -372), lyE = addDays(t, -366);
+    (D.lyAd || []).forEach(r => {
+      if (r.date < lyS || r.date > lyE) return;
+      const e = (lyBy[r.brand] = lyBy[r.brand] || { cost: 0, rev: 0 });
+      e.cost += +r.cost || 0; e.rev += +(r.revenue ?? r.conv_revenue) || 0;
+    });
 
     Object.entries(byBrand).forEach(([brand, d]) => {
       const rec = sumM(d.recent), prev = sumM(d.prev), yd = sumM(d.yday);
@@ -564,11 +574,16 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
           : drop > 0 ? { s: 'yellow', t: `순위 급락 ${drop}건` }
           : { s: 'green', t: `${okc}개 키워드 정상 노출` };
       }
-      // 목표 달성률(최근 7일 ROAS ÷ 목표 ROAS) + YOY(작년 동기 ROAS 대비)
+      // 목표 달성률(최근 7일 ROAS ÷ 목표 ROAS) + YOY(작년 동기 7일 실데이터 자동 비교)
       let goal = null;
       if (tg && +tg.target_roas > 0 && rec.cost > 1000) {
         goal = { rate: Math.round(rRoas / +tg.target_roas * 100), target: +tg.target_roas };
-        if (+tg.yoy_roas > 0) goal.yoyDiff = Math.round(rRoas - +tg.yoy_roas);
+      }
+      const ly = lyBy[brand];
+      if (ly && ly.cost > 1000 && rec.cost > 1000) {
+        const lyRoas = ly.rev / ly.cost * 100;
+        goal = goal || { rate: null, target: null };
+        goal.yoyDiff = Math.round(rRoas - lyRoas);
       }
       rows.push({ brand, cost: yd.cost, rev: yd.rev, roas: roasOf(yd), perf, chat, review, rank, goal });
     });
