@@ -96,8 +96,16 @@ async function uploadFiles(files) {
 }
 
 // ══════════════ 일일보고: 내 보고 작성 (직원+대표 공용) ══════════════
+// 여러 줄(줄바꿈)로 저장된 '오늘 한 일'을 항목 배열로 — 최소 minLen칸 유지
+const splitItems = (s, minLen = 3) => {
+  const arr = (s || '').split('\n').map(x => x.replace(/^\s*[-·•\d.]+\s*/, '').trim());
+  while (arr.length < minLen) arr.push('');
+  return arr.length ? arr : Array(minLen).fill('');
+};
+
 function MyDaily({ currentUser, onSaved }) {
   const [form, setForm] = useState({ done: '', tomorrow: '', blocker: '' });
+  const [doneItems, setDoneItems] = useState(['', '', '']);   // 오늘 한 일 — 항목별 입력
   const [history, setHistory] = useState([]);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
@@ -111,6 +119,7 @@ function MyDaily({ currentUser, onSaved }) {
     const todayR = list.find(r => r.report_date === td);
     if (todayR) {
       setForm({ done: todayR.done || '', tomorrow: todayR.tomorrow || '', blocker: todayR.blocker || '' });
+      setDoneItems(splitItems(todayR.done, 3));
       setExistingAtts(todayR.attachments || []);
     }
   }, [currentUser.id]);
@@ -119,11 +128,12 @@ function MyDaily({ currentUser, onSaved }) {
   const submitted = history.some(r => r.report_date === td);
 
   const save = async () => {
-    if (!form.done.trim() && !form.tomorrow.trim()) { alert('오늘 한 일 또는 내일 최우선 중 하나는 적어주세요.'); return; }
+    const done = doneItems.map(x => x.trim()).filter(Boolean).join('\n');
+    if (!done && !form.tomorrow.trim()) { alert('오늘 한 일 또는 내일 최우선 중 하나는 적어주세요.'); return; }
     setSaving(true);
     const newAtts = await uploadFiles(files);
     const atts = [...existingAtts, ...newAtts];
-    const r = await upsertDailyReport({ owner_id: currentUser.id, staff_name: currentUser.name, report_date: td, ...form, attachments: atts });
+    const r = await upsertDailyReport({ owner_id: currentUser.id, staff_name: currentUser.name, report_date: td, ...form, done, attachments: atts });
     setSaving(false);
     if (r.ok) {
       setFiles([]); setExistingAtts(atts);
@@ -140,8 +150,30 @@ function MyDaily({ currentUser, onSaved }) {
           : [0, 6].includes(new Date(td + 'T00:00:00').getDay()) ? <span style={badge('rgba(136,144,166,0.15)', C.txd)}>주말 — 제출은 선택</span>
           : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}>
         <div style={{ display: 'grid', gap: 10 }}>
-          <div><div style={label}>① 오늘 한 일 · 성과</div>
-            <textarea style={ta} value={form.done} placeholder="예) 모그라미 여름 프로모션 소재 3종 교체, ROAS 낮은 키워드 12개 제외" onChange={e => setForm(f => ({ ...f, done: e.target.value }))} /></div>
+          <div>
+            <div style={label}>① 오늘 한 일 · 성과 <span style={{ color: C.txm, fontWeight: 400, fontSize: 11 }}>— 한 칸에 한 가지씩 적어주세요</span></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {doneItems.map((v, i) => (
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: C.txd, width: 18, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
+                  <input
+                    style={{ flex: 1, background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '9px 11px', color: C.tx, fontSize: 13, outline: 'none' }}
+                    value={v}
+                    placeholder={i === 0 ? '예) 모그라미 여름 프로모션 소재 3종 교체' : i === 1 ? '예) ROAS 낮은 키워드 12개 제외' : '한 가지씩 적어주세요'}
+                    onChange={e => setDoneItems(items => items.map((x, j) => j === i ? e.target.value : x))}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); if (i === doneItems.length - 1) setDoneItems(items => [...items, '']); }
+                    }} />
+                  {doneItems.length > 1 && (
+                    <button title="이 줄 삭제" onClick={() => setDoneItems(items => items.filter((_, j) => j !== i))}
+                      style={{ background: 'none', border: `1px solid ${C.bd}`, borderRadius: 7, width: 30, height: 32, color: C.txm, cursor: 'pointer', flexShrink: 0, fontSize: 14 }}>×</button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setDoneItems(items => [...items, ''])}
+              style={{ marginTop: 7, background: 'none', border: `1px dashed ${C.bd}`, borderRadius: 8, padding: '7px 14px', color: C.ac, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>+ 추가</button>
+          </div>
           <div><div style={label}>② 내일 최우선 1가지</div>
             <textarea style={{ ...ta, minHeight: 44 }} value={form.tomorrow} placeholder="예) 천비누솝 신규 캠페인 세팅 완료" onChange={e => setForm(f => ({ ...f, tomorrow: e.target.value }))} /></div>
           <div><div style={label}>③ 막힌 것 · 도움 필요한 것 (없으면 비워두세요)</div>
@@ -162,7 +194,9 @@ function MyDaily({ currentUser, onSaved }) {
           history.map(r => (
             <div key={r.id} style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px' }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.cyan, marginBottom: 4 }}>{kdw(r.report_date)}</div>
-              {r.done && <div style={{ fontSize: 13, marginBottom: 2 }}>✅ {r.done}</div>}
+              {r.done && (r.done.split('\n').filter(x => x.trim()).map((line, i) => (
+                <div key={i} style={{ fontSize: 13, marginBottom: 2 }}>✅ {line.trim()}</div>
+              )))}
               {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 2 }}>▶ 내일: {r.tomorrow}</div>}
               {r.blocker && <div style={{ fontSize: 13, color: C.warn, marginBottom: 2 }}>⚠ {r.blocker}</div>}
               <AttachThumbs atts={r.attachments} />
@@ -223,7 +257,9 @@ function DailyAdmin({ users, currentUser }) {
                 </div>
                 {r ? (
                   <div>
-                    {r.done && <div style={{ fontSize: 13, marginBottom: 4 }}>✅ {r.done}</div>}
+                    {r.done && (r.done.split('\n').filter(x => x.trim()).map((line, i) => (
+                      <div key={i} style={{ fontSize: 13, marginBottom: 4 }}>✅ {line.trim()}</div>
+                    )))}
                     {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 4 }}>▶ 내일: {r.tomorrow}</div>}
                     {r.blocker ? <div style={{ fontSize: 13, color: C.warn, marginBottom: 4 }}>⚠ {r.blocker}</div>
                       : <div style={{ fontSize: 12, color: C.txm, marginBottom: 4 }}>막힌 것 없음</div>}
@@ -787,7 +823,7 @@ function TeamCalendar({ users, currentUser, isAdmin }) {
             {dayReports.map(r => (
               <div key={r.id} style={{ fontSize: 12.5, marginBottom: 6 }}>
                 <b style={{ color: C.cyan }}>{r.staff_name}</b>
-                {r.done && <span style={{ color: C.tx }}> — {r.done.slice(0, 100)}{r.done.length > 100 ? '…' : ''}</span>}
+                {r.done && (() => { const items = r.done.split('\n').filter(x => x.trim()); const first = items[0].trim().slice(0, 80); return <span style={{ color: C.tx }}> — {first}{items.length > 1 ? ` 외 ${items.length - 1}건` : ''}</span>; })()}
                 {r.blocker && <span style={{ color: C.warn }}> ⚠ {r.blocker.slice(0, 50)}</span>}
               </div>
             ))}
