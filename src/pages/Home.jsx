@@ -246,7 +246,7 @@ function TodoList({ items, setTab }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {list.map((it, i) => (
-            <div key={i} onClick={() => it.tab && setTab(it.tab)} style={{
+            <div key={i} onClick={() => { if (!it.tab) return; if (it.tab === 'diagnosis' && it.brand) { try { sessionStorage.setItem('oha_diag_brand', it.brand); } catch { /* ignore */ } } setTab(it.tab); }} style={{
               display: 'flex', alignItems: 'center', gap: 10, background: C.sf2, border: `1px solid ${C.bd}`,
               borderLeft: `3px solid ${SEV[it.sev].c}`, borderRadius: 9, padding: '9px 12px', cursor: it.tab ? 'pointer' : 'default',
             }}>
@@ -480,10 +480,36 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     const todos = [];
     const rows = [];
 
-    // 성과 경고 이벤트: 최근 7일 것만, 브랜드당 최신 1건 (오래된 미해결 건이 홈을 뒤덮지 않도록)
+    // 저장된 성과 경고를 '현재 데이터'로 재검증 (며칠 전 만들어진 경고가 상황이 바뀌었는데도 뜨는 것 방지)
+    const liveByBrand = {};
+    Object.entries(byBrand).forEach(([b, d]) => {
+      const rec = sumM(d.recent), prev = sumM(d.prev);
+      liveByBrand[b] = { rCost: rec.cost, pCost: prev.cost, rRev: rec.rev, pRev: prev.rev, rRoas: roasOf(rec), pRoas: roasOf(prev) };
+    });
+    const perfStillValid = (p) => {
+      const lv = liveByBrand[p.brand];
+      if (!lv) return false;   // 현재 데이터로 확인 안 되면 표시하지 않음 (오탐 방지 우선)
+      const title = p.title || '';
+      if (title.includes('예산') || title.includes('광고비 급감')) {
+        // 실제로 지금도 광고비가 30% 이상 줄어 있을 때만 유효
+        return lv.pCost > 0 && lv.rCost < lv.pCost * 0.70;
+      }
+      if (title.includes('매출')) {
+        return lv.pRev > 0 && lv.rRev < lv.pRev * 0.85;
+      }
+      if (title.includes('ROAS')) {
+        return lv.pRoas > 0 && lv.rRoas < lv.pRoas * 0.85;
+      }
+      if (title.includes('노출') || title.includes('중단')) {
+        return lv.pCost > 0 && lv.rCost < lv.pCost * 0.5;
+      }
+      return true;
+    };
+
+    // 성과 경고 이벤트: 최근 7일 것 + 현재도 유효한 것만, 브랜드당 최신 1건
     const recentPerf = [];
     const seenPerfBrand = new Set();
-    D.perfAlerts.filter(p => inB(p.brand) && (p.event_date || '') >= addDays(t, -7)).forEach(p => {
+    D.perfAlerts.filter(p => inB(p.brand) && (p.event_date || '') >= addDays(t, -7) && perfStillValid(p)).forEach(p => {
       if (seenPerfBrand.has(p.brand)) return;
       seenPerfBrand.add(p.brand);
       recentPerf.push(p);
@@ -510,16 +536,16 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
         const prevDailyImp = prev.imp / 7;
         if (prevDailyImp > 500 && d.r2imp < prevDailyImp * 0.2) {
           perf = { s: 'red', t: '노출 급감 — 광고 중단 의심' };
-          if (!seenPerfBrand.has(brand)) todos.push({ sev: 'high', brand, title: '노출 급감 — 광고 중단 의심', desc: '최근 노출이 이전 평균의 20% 미만', tab: 'overview' });
+          if (!seenPerfBrand.has(brand)) todos.push({ sev: 'high', brand, title: '노출 급감 — 광고 중단 의심', desc: '최근 노출이 이전 평균의 20% 미만', tab: 'diagnosis' });
         } else if (tg && +tg.target_roas > 0 && rec.cost > 30000) {
           // 목표가 있으면 목표 기준으로 판단 (담당자가 정한 기준이 우선)
           const rate = rRoas / +tg.target_roas * 100;
           if (rate < 70) {
             perf = { s: 'red', t: `목표 ROAS ${fmtNum(+tg.target_roas)}% 대비 ${Math.round(rate)}% 달성 — 크게 미달` };
-            todos.push({ sev: 'high', brand, title: '목표 ROAS 크게 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}% (달성 ${Math.round(rate)}%)`, tab: 'overview' });
+            todos.push({ sev: 'high', brand, title: '목표 ROAS 크게 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}% (달성 ${Math.round(rate)}%)`, tab: 'diagnosis' });
           } else if (rate < 90) {
             perf = { s: 'yellow', t: `목표 ROAS 대비 ${Math.round(rate)}% 달성 — 미달` };
-            todos.push({ sev: 'mid', brand, title: '목표 ROAS 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}%`, tab: 'overview' });
+            todos.push({ sev: 'mid', brand, title: '목표 ROAS 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}%`, tab: 'diagnosis' });
           } else {
             perf = { s: 'green', t: `목표 ROAS 대비 ${Math.round(rate)}% 달성` };
           }
@@ -527,7 +553,7 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
           // 목표 미기재 브랜드는 기존처럼 자기 과거 대비로 판단
           const stillGood = rRoas >= 400;
           perf = { s: stillGood ? 'yellow' : 'red', t: `ROAS 하락 ${Math.round(pRoas)}%→${Math.round(rRoas)}%` };
-          if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${Math.round(pRoas)}% → ${Math.round(rRoas)}%`, tab: 'overview' });
+          if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${Math.round(pRoas)}% → ${Math.round(rRoas)}%`, tab: 'diagnosis' });
         } else if (pRoas > 50 && rRoas < pRoas * 0.85) {
           perf = { s: 'yellow', t: `ROAS 완만한 하락 (${Math.round(rRoas)}%)` };
         }
@@ -536,11 +562,11 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
       if (tg && +tg.daily_budget > 0 && yd.cost >= 0) {
         const b = +tg.daily_budget;
         if (yd.cost > b * 1.2) {
-          todos.push({ sev: 'high', brand, title: '1일 예산 초과', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'overview' });
+          todos.push({ sev: 'high', brand, title: '1일 예산 초과', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'diagnosis' });
         } else if (yd.cost < b * 0.3 && d.yday.length > 0) {
-          todos.push({ sev: 'high', brand, title: '예산 대비 집행 급감 — 광고 축소·중단 의심', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'overview' });
+          todos.push({ sev: 'high', brand, title: '예산 대비 집행 급감 — 광고 축소·중단 의심', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'diagnosis' });
         } else if (yd.cost < b * 0.3 && d.yday.length === 0 && rec.cost > 1000) {
-          todos.push({ sev: 'high', brand, title: '어제 집행 기록 없음', desc: `1일 예산 ${won(b)}인데 어제 데이터가 없습니다`, tab: 'overview' });
+          todos.push({ sev: 'high', brand, title: '어제 집행 기록 없음', desc: `1일 예산 ${won(b)}인데 어제 데이터가 없습니다`, tab: 'diagnosis' });
         }
       }
       // 대화 신호
@@ -593,7 +619,7 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     recentPerf.forEach(p => {
       let title = p.title || '성과 경고';
       if (p.brand && title.startsWith(p.brand)) title = title.slice(p.brand.length).trim();
-      todos.push({ sev: 'high', brand: p.brand, title, desc: p.memo || '', tab: 'overview' });
+      todos.push({ sev: 'high', brand: p.brand, title, desc: p.memo || '', tab: 'diagnosis' });
     });
     // 후기 저평점: 브랜드(매장) 단위로 묶어 1건씩만
     const lowByBrand = {};
