@@ -185,7 +185,7 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
                         </td>
                         <td style={{ ...td, textAlign: 'right' }}>
                           <div style={{ color: C.txd }}>{fmtWon(Math.round(g.base?.cost || 0))} → <b style={{ color: C.tx }}>{fmtWon(Math.round(g.cur?.cost || 0))}</b></div>
-                          <div style={{ fontSize: 10.5 }}>{arrow(pct(g.cur?.cost || 0, g.base?.cost || 0), true)}</div>
+                          <div style={{ fontSize: 10.5 }}>{arrow(pct(g.cur?.cost || 0, g.base?.cost || 0))}</div>
                         </td>
                         <td style={{ ...td, textAlign: 'right' }}>
                           <div style={{ color: C.txd }}>{fmtWon(Math.round(g.base?.rev || 0))} → <b style={{ color: C.tx }}>{fmtWon(Math.round(g.cur?.rev || 0))}</b></div>
