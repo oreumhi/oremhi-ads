@@ -72,7 +72,13 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
     mappings.forEach(m => { if (m.brand && (!allowedBrands || allowedBrands.includes(m.brand))) s.add(m.brand); });
     return [...s].sort();
   }, [mappings, allowedBrands]);
-  useEffect(() => { if (!brand && brands.length) setBrand(brands[0]); }, [brands, brand]);
+  // 홈 '오늘 챙길 것'에서 넘어온 경우 해당 브랜드로 자동 선택 (1회)
+  useEffect(() => {
+    if (brand || !brands.length) return;
+    let pre = '';
+    try { pre = sessionStorage.getItem('oha_diag_brand') || ''; sessionStorage.removeItem('oha_diag_brand'); } catch { /* ignore */ }
+    setBrand(pre && brands.includes(pre) ? pre : brands[0]);
+  }, [brands, brand]);
 
   const base = BASELINES.find(b => b.key === baseKey);
   const t = today();
