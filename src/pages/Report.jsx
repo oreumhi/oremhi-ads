@@ -5,7 +5,7 @@
 // ============================================
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { fetchAdDaily, fetchAdDataWindow, fetchMappingsAll, fetchBrandTargets, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
+import { fetchAdDaily, fetchAdDailyWindow, fetchAdDataWindow, fetchMappingsAll, fetchBrandTargets, fetchReportKeyword, fetchReportMedia, fetchReportHour, fetchReportDemo } from '../store';
 import { fmtWon, fmtNum } from '../utils';
 
 const R = {
@@ -238,6 +238,7 @@ export default function Report({ currentUser, allowedBrands }) {
   const [targets, setTargets] = useState([]);
   useEffect(() => { fetchBrandTargets().then(setTargets); }, []);
   const tg = useMemo(() => targets.find(x => x.brand === brand) || null, [targets, brand]);
+  const [lyAgg, setLyAgg] = useState([]);   // 작년 같은 기간 (YOY 자동 — 작년 보고서 데이터)
 
   const mapByKey = useMemo(() => { const m = {}; mappings.forEach(x => m[x.match_key] = x); return m; }, [mappings]);
   const brands = useMemo(() => {
@@ -266,6 +267,9 @@ export default function Report({ currentUser, allowedBrands }) {
     Promise.all([
       fetchReportKeyword(null, thisFrom, thisTo), fetchReportMedia(null, thisFrom, thisTo), fetchReportHour(null, thisFrom, thisTo), fetchReportDemo(null, thisFrom, thisTo),
     ]).then(([k, m, h, dm]) => { if (alive) { setKwData(k); setMediaData(m); setHourData(h); setDemoData(dm); } });
+    // 작년 같은 기간 (YOY)
+    fetchAdDailyWindow(addDays(thisFrom, -365), addDays(thisTo, -365))
+      .then(rows => { if (alive) setLyAgg(rows || []); });
     return () => { alive = false; };
   }, [thisFrom, thisTo]);
 
@@ -518,32 +522,41 @@ export default function Report({ currentUser, allowedBrands }) {
             <Kpi label="평균 CPC" value={won(cpcOf(cur))} cur={cpcOf(cur)} prev={cpcOf(prev)} invert />
           </div>
 
-          {/* 목표·작년 동기(YOY) 비교 — 설정의 '브랜드 목표 관리'에 기재된 경우만 */}
-          {tg && (+tg.target_roas > 0 || +tg.daily_budget > 0 || +tg.yoy_roas > 0 || +tg.yoy_revenue > 0 || +tg.yoy_budget > 0) && (() => {
+          {/* 목표(기재 시)·작년 동기(YOY, 작년 보고서 데이터 자동) 비교 */}
+          {(() => {
             const curRoas = roasOf(cur);
             const dailyCost = cur.cost / P.n, dailyRev = cur.revenue / P.n;
+            // 작년 같은 기간, 같은 채널 합계
+            let lyCost = 0, lyRev = 0;
+            const lyDates = new Set();
+            lyAgg.forEach(r => {
+              if (r.brand !== brand) return;
+              const isGfa = r.source === 'gfa' || (r.ad_type || '').startsWith('GFA');
+              if (channel === 'gfa' ? !isGfa : isGfa) return;
+              lyCost += +r.cost || 0; lyRev += +(r.revenue ?? 0) || 0; lyDates.add(r.date);
+            });
+            const lyDays = Math.max(1, lyDates.size);
             const cells = [];
-            if (+tg.target_roas > 0) {
+            if (tg && +tg.target_roas > 0) {
               const rate = Math.round(curRoas / +tg.target_roas * 100);
               cells.push({ l: '목표 ROAS 달성률', v: rate + '%', s: `목표 ${fmtNum(+tg.target_roas)}%`, c: rate >= 100 ? R.ok : rate >= 90 ? R.warn : R.no });
             }
-            if (+tg.daily_budget > 0) {
+            if (tg && +tg.daily_budget > 0) {
               const rate = Math.round(dailyCost / +tg.daily_budget * 100);
               cells.push({ l: '1일 예산 집행률', v: rate + '%', s: `예산 ${won(+tg.daily_budget)}/일`, c: rate > 120 ? R.no : rate < 30 ? R.warn : R.ink });
             }
-            if (+tg.yoy_roas > 0) {
-              const d = Math.round(curRoas - +tg.yoy_roas);
-              cells.push({ l: 'ROAS (작년 동기 대비)', v: (d >= 0 ? '+' : '') + d + '%p', s: `작년 ${fmtNum(+tg.yoy_roas)}%`, c: d >= 0 ? R.ok : R.no });
+            if (lyCost > 0) {
+              const lyRoas = lyRev / lyCost * 100;
+              const d = Math.round(curRoas - lyRoas);
+              cells.push({ l: 'ROAS (작년 동기 대비)', v: (d >= 0 ? '+' : '') + d + '%p', s: `작년 ${Math.round(lyRoas)}%`, c: d >= 0 ? R.ok : R.no });
+              const g = Math.round((dailyCost / (lyCost / lyDays) - 1) * 100);
+              cells.push({ l: '광고비 (작년 동기 대비)', v: (g >= 0 ? '+' : '') + g + '%', s: '일평균 기준', c: R.ink });
             }
-            if (+tg.yoy_revenue > 0) {
-              const base = +tg.yoy_revenue / 30;
-              const g = Math.round((dailyRev / base - 1) * 100);
-              cells.push({ l: '매출 (작년 동기 대비)', v: (g >= 0 ? '+' : '') + g + '%', s: `일평균 기준`, c: g >= 0 ? R.ok : R.no });
+            if (lyRev > 0) {
+              const g = Math.round((dailyRev / (lyRev / lyDays) - 1) * 100);
+              cells.push({ l: '매출 (작년 동기 대비)', v: (g >= 0 ? '+' : '') + g + '%', s: '일평균 기준', c: g >= 0 ? R.ok : R.no });
             }
-            if (+tg.yoy_budget > 0 && +tg.daily_budget > 0) {
-              const g = Math.round((+tg.daily_budget / +tg.yoy_budget - 1) * 100);
-              cells.push({ l: '1일 예산 (작년 대비)', v: (g >= 0 ? '+' : '') + g + '%', s: `작년 ${won(+tg.yoy_budget)}/일`, c: R.ink });
-            }
+            if (!cells.length) return null;
             return (
               <div style={{ marginTop: 14, background: '#f7f5ff', border: '1px solid #e4defc', borderRadius: 12, padding: '14px 18px' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 800, color: R.pur, marginBottom: 10 }}>🎯 목표 · 작년 동기(YOY) 비교</div>
