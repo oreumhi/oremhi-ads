@@ -7,7 +7,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { C, RANGES, AD_TYPE_ORDER, AD_TYPE_COLORS } from '../config';
-import { fetchBrandTargets } from '../store';
+import { fetchBrandTargets, fetchAdDailyWindow } from '../store';
 import PeriodPicker, { NaverCards } from '../components/PeriodPicker';
 import { fmtWon, fmtNum, fmt, filterByRange, sumMetrics, calcCtr, calcCpa, calcRoas } from '../utils';
 import TodayAlerts from '../components/TodayAlerts';
@@ -60,6 +60,26 @@ export default function Overview({ data, allowedBrands, changeRange, changeCusto
   const [targets, setTargets] = useState([]);
   useEffect(() => { fetchBrandTargets().then(setTargets); }, []);
   const targetBy = useMemo(() => { const m = {}; targets.forEach(t => { m[t.brand] = t; }); return m; }, [targets]);
+
+  // YOY 자동: 현재 보는 기간의 '작년 같은 기간'을 집계 테이블에서 조회 (작년 보고서 데이터 기반)
+  const [lyByBrand, setLyByBrand] = useState({});
+  const ymdL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const shiftYear = (s) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() - 365); return ymdL(d); };
+  useEffect(() => {
+    (async () => {
+      let from, to;
+      if (custom) { from = custom.from; to = custom.to; }
+      else if (range > 0) { const d = new Date(); const t2 = ymdL(d); d.setDate(d.getDate() - range); from = ymdL(d); to = t2; }
+      else { setLyByBrand({}); return; }
+      const rows = await fetchAdDailyWindow(shiftYear(from), shiftYear(to));
+      const m = {};
+      (rows || []).forEach(r => {
+        const e = (m[r.brand] = m[r.brand] || { cost: 0, rev: 0, days: new Set() });
+        e.cost += +r.cost || 0; e.rev += +(r.revenue ?? 0) || 0; e.days.add(r.date);
+      });
+      setLyByBrand(m);
+    })();
+  }, [range, custom]);
   const [view, setView] = useState('brand'); // 'brand' | 'media'
   const [custom, setCustom] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -197,6 +217,12 @@ export default function Overview({ data, allowedBrands, changeRange, changeCusto
         const days = Math.max(1, new Set(allRows.map(r => r.date)).size);
         const dailyRev = bm.conv_revenue / days;
         const dailyCost = bm.cost / days;
+        // 작년 같은 기간 (자동)
+        const ly = lyByBrand[b];
+        const lyDays = ly ? Math.max(1, ly.days.size) : 1;
+        const lyRoas = ly && ly.cost > 0 ? ly.rev / ly.cost * 100 : null;
+        const lyDailyRev = ly && ly.rev > 0 ? ly.rev / lyDays : null;
+        const lyDailyCost = ly && ly.cost > 0 ? ly.cost / lyDays : null;
         return (
           <div key={b} style={{ marginBottom: 18 }}>
             <div style={{ background: color + '12', border: `1px solid ${color}33`, borderRadius: 10, padding: '10px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -215,16 +241,26 @@ export default function Overview({ data, allowedBrands, changeRange, changeCusto
                       💳 예산 집행률 {Math.round(dailyCost / +tg.daily_budget * 100)}%
                     </span>
                   )}
-                  {+tg.yoy_roas > 0 && (
-                    <span title={`작년 동기 ROAS ${fmtNum(tg.yoy_roas)}%`}
-                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: bRoas >= +tg.yoy_roas ? C.ok : C.no }}>
-                      ROAS YOY {bRoas >= +tg.yoy_roas ? '▲' : '▼'}{Math.abs(Math.round(bRoas - +tg.yoy_roas))}%p
+                </span>
+              )}
+              {(lyRoas != null || lyDailyRev != null) && (
+                <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, alignItems: 'center' }}>
+                  {lyRoas != null && (
+                    <span title={`작년 같은 기간 ROAS ${Math.round(lyRoas)}% (보고서 데이터 자동 비교)`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: bRoas >= lyRoas ? C.ok : C.no }}>
+                      ROAS YOY {bRoas >= lyRoas ? '▲' : '▼'}{Math.abs(Math.round(bRoas - lyRoas))}%p
                     </span>
                   )}
-                  {+tg.yoy_revenue > 0 && (
-                    <span title={`작년 동기 매출(월) ${fmtWon(tg.yoy_revenue)} → 일평균 ${fmtWon(Math.round(+tg.yoy_revenue / 30))} · 이번 기간 일평균 ${fmtWon(Math.round(dailyRev))}`}
-                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: dailyRev >= +tg.yoy_revenue / 30 ? C.ok : C.no }}>
-                      매출 YOY {dailyRev >= +tg.yoy_revenue / 30 ? '▲' : '▼'}{Math.round(Math.abs(dailyRev / (+tg.yoy_revenue / 30) - 1) * 100)}%
+                  {lyDailyRev != null && (
+                    <span title={`작년 같은 기간 일평균 매출 ${fmtWon(Math.round(lyDailyRev))} · 이번 기간 일평균 ${fmtWon(Math.round(dailyRev))}`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: dailyRev >= lyDailyRev ? C.ok : C.no }}>
+                      매출 YOY {dailyRev >= lyDailyRev ? '▲' : '▼'}{Math.round(Math.abs(dailyRev / lyDailyRev - 1) * 100)}%
+                    </span>
+                  )}
+                  {lyDailyCost != null && (
+                    <span title={`작년 같은 기간 일평균 광고비 ${fmtWon(Math.round(lyDailyCost))} · 이번 기간 일평균 ${fmtWon(Math.round(dailyCost))}`}
+                      style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '3px 9px', color: C.txd }}>
+                      광고비 YOY {dailyCost >= lyDailyCost ? '▲' : '▼'}{Math.round(Math.abs(dailyCost / lyDailyCost - 1) * 100)}%
                     </span>
                   )}
                 </span>
