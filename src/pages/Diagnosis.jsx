@@ -1,0 +1,212 @@
+// ============================================
+// 하락 진단 — 광고그룹 단위로 "어디서 매출/ROAS가 빠졌나"를 자동으로 찾아냅니다.
+//   광고주를 고르면 최근 기간을 1·3·6개월 전·작년 같은 기간과 비교해,
+//   매출·ROAS·광고비가 하락한 광고그룹을 하락 큰 순으로 정렬해 범인을 위로 올립니다.
+//   (대표님이 엑셀로 손수 대조하던 작업을 자동화)
+// ============================================
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { C } from '../config';
+import { fetchAdDataWindow, fetchMappingsAll } from '../store';
+import { fmtWon, fmtNum, today } from '../utils';
+
+const card = { background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginBottom: 16 };
+const chip = (on) => ({ border: `1px solid ${on ? C.ac : C.bd}`, background: on ? C.ac : 'transparent', color: on ? '#fff' : C.txd, borderRadius: 999, padding: '5px 13px', fontSize: 12.5, cursor: 'pointer', fontWeight: on ? 700 : 400 });
+const th = { textAlign: 'right', padding: '7px 9px', fontSize: 10.5, color: C.txm, fontWeight: 600, whiteSpace: 'nowrap' };
+const td = { padding: '9px 9px', fontSize: 12.5, borderTop: `1px solid ${C.bd}`, whiteSpace: 'nowrap' };
+
+const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const roasOf = (m) => m.cost > 0 ? m.rev / m.cost * 100 : 0;
+const pct = (cur, base) => base > 0 ? Math.round((cur / base - 1) * 100) : (cur > 0 ? 100 : 0);
+
+const BASELINES = [
+  { key: 'm1', label: '1개월 전', off: 30 },
+  { key: 'm3', label: '3개월 전', off: 91 },
+  { key: 'm6', label: '6개월 전', off: 182 },
+  { key: 'yoy', label: '작년 동기', off: 365 },
+];
+const RECENTS = [[7, '최근 7일'], [14, '최근 14일'], [30, '최근 30일']];
+
+// 광고그룹 단위 합계 (캠페인+광고그룹으로 구분)
+function aggByGroup(rows, mapByKey, brand) {
+  const g = {};
+  rows.forEach(r => {
+    const mp = mapByKey[r.match_key];
+    if (!mp || mp.brand !== brand) return;
+    const camp = r.campaign_name || mp.campaign || '';
+    const grp = r.group_name || '(그룹없음)';
+    const key = camp + ' ▸ ' + grp;
+    const e = (g[key] = g[key] || { camp, grp, cost: 0, rev: 0, conv: 0, imp: 0, clk: 0 });
+    e.cost += +r.cost || 0;
+    e.rev += +(r.conv_revenue ?? r.revenue) || 0;
+    e.conv += +r.conversions || 0;
+    e.imp += +r.impressions || 0;
+    e.clk += +r.clicks || 0;
+  });
+  return g;
+}
+
+// 진단 태그
+function diagnose(cur, base) {
+  if (!base || base.cost < 500) {
+    return cur && cur.cost > 500 ? { s: 'new', t: '🆕 신규 집행', c: C.ac } : { s: 'none', t: '—', c: C.txm };
+  }
+  if (!cur || cur.cost < 500) return { s: 'stopped', t: '⚫ 최근 집행 없음', c: C.txm };
+  const revChg = pct(cur.rev, base.rev);
+  const costChg = pct(cur.cost, base.cost);
+  const cR = roasOf(cur), bR = roasOf(base);
+  if (revChg >= -10) return { s: 'ok', t: revChg >= 15 ? '🟢 성장' : '🟢 유지', c: C.ok };
+  // 매출이 빠졌다 → 원인 분류
+  if (cR < bR * 0.8 && costChg >= -15) return { s: 'bad', t: '🔴 효율 급락 (돈 쓰고 안 팔림)', c: C.no };
+  if (costChg <= -25 && cR >= bR * 0.9) return { s: 'cut', t: '🟡 광고 축소로 매출만 감소', c: C.yel };
+  if (cur.imp < base.imp * 0.7 && cR >= bR * 0.9) return { s: 'imp', t: '🟡 노출 감소 (효율은 유지)', c: C.yel };
+  return { s: 'down', t: '🔴 매출 하락', c: C.no };
+}
+
+export default function Diagnosis({ currentUser, allowedBrands }) {
+  const [mappings, setMappings] = useState([]);
+  const [brand, setBrand] = useState('');
+  const [recentN, setRecentN] = useState(14);
+  const [baseKey, setBaseKey] = useState('yoy');
+  const [data, setData] = useState(null);   // { groups, curTot, baseTot, empty }
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { fetchMappingsAll().then(setMappings); }, []);
+  const mapByKey = useMemo(() => { const m = {}; mappings.forEach(x => { m[x.match_key] = x; }); return m; }, [mappings]);
+  const brands = useMemo(() => {
+    const s = new Set();
+    mappings.forEach(m => { if (m.brand && (!allowedBrands || allowedBrands.includes(m.brand))) s.add(m.brand); });
+    return [...s].sort();
+  }, [mappings, allowedBrands]);
+  useEffect(() => { if (!brand && brands.length) setBrand(brands[0]); }, [brands, brand]);
+
+  const base = BASELINES.find(b => b.key === baseKey);
+  const t = today();
+  const curFrom = addDays(t, -(recentN - 1)), curTo = t;
+  const baseFrom = addDays(curFrom, -base.off), baseTo = addDays(curTo, -base.off);
+
+  const run = useCallback(async () => {
+    if (!brand || !mappings.length) return;
+    setLoading(true);
+    const [curRows, baseRows] = await Promise.all([
+      fetchAdDataWindow(curFrom, curTo, null),
+      fetchAdDataWindow(baseFrom, baseTo, null),
+    ]);
+    const curG = aggByGroup(curRows, mapByKey, brand);
+    const baseG = aggByGroup(baseRows, mapByKey, brand);
+    const keys = new Set([...Object.keys(curG), ...Object.keys(baseG)]);
+    const groups = [...keys].map(k => {
+      const cur = curG[k], bs = baseG[k];
+      return { key: k, camp: (cur || bs).camp, grp: (cur || bs).grp, cur, base: bs, dx: diagnose(cur, bs) };
+    });
+    // 매출 하락액이 큰 순 (범인 위로) → 그 외는 최근 매출 순
+    groups.sort((a, b) => {
+      const da = (a.base?.rev || 0) - (a.cur?.rev || 0);
+      const db = (b.base?.rev || 0) - (b.cur?.rev || 0);
+      if (db !== da) return db - da;
+      return (b.cur?.rev || 0) - (a.cur?.rev || 0);
+    });
+    const sum = (g) => Object.values(g).reduce((a, e) => ({ cost: a.cost + e.cost, rev: a.rev + e.rev, conv: a.conv + e.conv }), { cost: 0, rev: 0, conv: 0 });
+    setData({ groups, curTot: sum(curG), baseTot: sum(baseG), empty: !Object.keys(baseG).length });
+    setLoading(false);
+  }, [brand, mappings, mapByKey, curFrom, curTo, baseFrom, baseTo]);
+  useEffect(() => { run(); }, [run]);
+
+  const arrow = (v, invGood) => {
+    if (v === 0) return <span style={{ color: C.txm }}>±0%</span>;
+    const good = invGood ? v < 0 : v > 0;
+    return <span style={{ color: good ? C.ok : C.no, fontWeight: 700 }}>{v > 0 ? '▲' : '▼'}{Math.abs(v)}%</span>;
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>🔎 하락 진단</div>
+      <div style={{ fontSize: 12, color: C.txd, marginBottom: 16, lineHeight: 1.6 }}>
+        매출이 빠진 광고주를 고르면, <b style={{ color: C.tx }}>어느 광고그룹</b>에서 매출·ROAS·광고비가 빠졌는지 자동으로 찾아 하락 큰 순으로 보여줍니다.
+      </div>
+
+      <div style={{ ...card, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={brand} onChange={e => setBrand(e.target.value)}
+          style={{ background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 8, color: C.tx, fontSize: 13, padding: '8px 12px', minWidth: 150 }}>
+          {brands.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <span style={{ display: 'flex', gap: 4 }}>{RECENTS.map(([n, l]) => <button key={n} style={chip(recentN === n)} onClick={() => setRecentN(n)}>{l}</button>)}</span>
+        <span style={{ color: C.txm, fontSize: 12 }}>vs</span>
+        <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{BASELINES.map(b => <button key={b.key} style={chip(baseKey === b.key)} onClick={() => setBaseKey(b.key)}>{b.label}</button>)}</span>
+      </div>
+
+      {loading ? <div style={{ ...card, color: C.txd, fontSize: 13 }}>불러오는 중…</div>
+        : !data ? null
+        : (
+        <>
+          {/* 브랜드 전체 요약 */}
+          <div style={{ ...card, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14 }}>
+            {[
+              ['매출', data.curTot.rev, data.baseTot.rev, false],
+              ['광고비', data.curTot.cost, data.baseTot.cost, false],
+              ['ROAS', roasOf(data.curTot), roasOf(data.baseTot), false],
+            ].map(([lab, cur, bs, inv]) => (
+              <div key={lab} style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: C.txd, marginBottom: 4 }}>{lab} <span style={{ color: C.txm }}>({base.label} 대비)</span></div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: C.tx }}>{lab === 'ROAS' ? Math.round(cur) + '%' : fmtWon(Math.round(cur))}</div>
+                <div style={{ fontSize: 11.5, marginTop: 3 }}>{arrow(lab === 'ROAS' ? Math.round(cur - bs) : pct(cur, bs))}{lab === 'ROAS' && <span style={{ color: C.txm }}>p</span>} <span style={{ color: C.txm }}>(과거 {lab === 'ROAS' ? Math.round(bs) + '%' : fmtWon(Math.round(bs))})</span></div>
+              </div>
+            ))}
+          </div>
+
+          {data.empty && (
+            <div style={{ ...card, fontSize: 12.5, color: C.warn, lineHeight: 1.7 }}>
+              ⚠ {base.label}({baseFrom}~{baseTo}) 데이터가 아직 없습니다.
+              {baseKey === 'yoy' ? ' 작년 데이터 백필이 완료되면 자동으로 채워집니다. 우선 1·3·6개월 전으로 비교해보세요.' : ' 이 기간의 보고서가 수집되지 않았습니다.'}
+            </div>
+          )}
+
+          <div style={card}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
+              광고그룹별 변화 <span style={{ fontSize: 11.5, color: C.txd, fontWeight: 400 }}>· 최근 {curFrom}~{curTo} vs {base.label} {baseFrom}~{baseTo}</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>매출이 많이 빠진 그룹이 맨 위입니다 · 진단은 매출·ROAS·광고비 변화를 함께 보고 원인을 추정합니다</div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...th, textAlign: 'left' }}>광고그룹</th>
+                    <th style={th}>광고비 (과거→최근)</th>
+                    <th style={th}>매출 (과거→최근)</th>
+                    <th style={th}>ROAS (과거→최근)</th>
+                    <th style={{ ...th, textAlign: 'left' }}>진단</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.groups.filter(g => (g.cur?.cost > 500 || g.base?.cost > 500)).map(g => {
+                    const cR = g.cur ? roasOf(g.cur) : null, bR = g.base ? roasOf(g.base) : null;
+                    return (
+                      <tr key={g.key}>
+                        <td style={{ ...td, whiteSpace: 'normal', maxWidth: 260 }}>
+                          <div style={{ fontWeight: 700, color: C.tx }}>{g.grp}</div>
+                          <div style={{ fontSize: 10.5, color: C.txm }}>{g.camp}</div>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          <div style={{ color: C.txd }}>{fmtWon(Math.round(g.base?.cost || 0))} → <b style={{ color: C.tx }}>{fmtWon(Math.round(g.cur?.cost || 0))}</b></div>
+                          <div style={{ fontSize: 10.5 }}>{arrow(pct(g.cur?.cost || 0, g.base?.cost || 0), true)}</div>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          <div style={{ color: C.txd }}>{fmtWon(Math.round(g.base?.rev || 0))} → <b style={{ color: C.tx }}>{fmtWon(Math.round(g.cur?.rev || 0))}</b></div>
+                          <div style={{ fontSize: 10.5 }}>{arrow(pct(g.cur?.rev || 0, g.base?.rev || 0))}</div>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          <div style={{ color: C.txd }}>{bR == null ? '—' : Math.round(bR) + '%'} → <b style={{ color: cR != null && bR != null && cR < bR ? C.no : C.tx }}>{cR == null ? '—' : Math.round(cR) + '%'}</b></div>
+                        </td>
+                        <td style={{ ...td, color: g.dx.c, fontWeight: 700, fontSize: 12 }}>{g.dx.t}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
