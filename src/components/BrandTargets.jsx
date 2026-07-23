@@ -18,10 +18,9 @@ const FIELDS = [
   ['target_roas', '목표 ROAS(%)'],
   ['target_revenue', '목표 매출액(월)'],
   ['daily_budget', '1일 예산'],
-  ['yoy_roas', '작년 ROAS(%)'],
-  ['yoy_revenue', '작년 매출액(월)'],
-  ['yoy_budget', '작년 1일예산'],
 ];
+// 작년 동기(YOY) 값은 사람이 적지 않습니다 — 작년 보고서 데이터가 DB에 쌓여 있어
+// 홈·종합요약·리포트가 "작년 같은 기간"을 자동으로 찾아 비교합니다.
 
 const numOrNull = (v) => {
   const s = String(v ?? '').replace(/[,\s원%]/g, '');
@@ -112,11 +111,11 @@ export default function BrandTargets({ brands, allowedBrands, currentUser }) {
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 860 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
                 <thead>
                   <tr>
                     <th style={{ ...th, textAlign: 'left' }}>브랜드</th>
-                    {FIELDS.map(([k, l]) => <th key={k} style={{ ...th, background: k.startsWith('yoy') ? '#9d7ff00d' : 'transparent' }}>{l}</th>)}
+                    {FIELDS.map(([k, l]) => <th key={k} style={th}>{l}</th>)}
                     <th style={th}></th>
                   </tr>
                 </thead>
@@ -130,7 +129,7 @@ export default function BrandTargets({ brands, allowedBrands, currentUser }) {
                           {t.updated_by && <div style={{ fontSize: 9.5, color: C.txm, fontWeight: 400 }}>{t.updated_by}</div>}
                         </td>
                         {FIELDS.map(([k]) => (
-                          <td key={k} style={{ ...td, minWidth: 92, background: k.startsWith('yoy') ? '#9d7ff008' : 'transparent' }}>
+                          <td key={k} style={{ ...td, minWidth: 110 }}>
                             {ed ? (
                               <input value={ed[k]} onChange={e => setF(t.brand, k, e.target.value)} style={inp}
                                 placeholder="—" onKeyDown={e => e.key === 'Enter' && save(t.brand)} />
@@ -167,7 +166,8 @@ export default function BrandTargets({ brands, allowedBrands, currentUser }) {
           )}
           <div style={{ fontSize: 10.5, color: C.txm, marginTop: 10, lineHeight: 1.7 }}>
             · <b style={{ color: C.txd }}>매출액은 월 기준</b>으로 적어주세요 (기간 비교 시 일평균으로 환산해 계산합니다) ·
-            보라색 열은 작년 동기(YOY) 값입니다 · 빈 칸은 "기준 없음"으로 두고 과거 평균으로 판단합니다
+            빈 칸은 "기준 없음"으로 두고 과거 평균으로 판단합니다 ·
+            <b style={{ color: C.txd }}> 작년 동기(YOY)는 적을 필요 없습니다</b> — 작년 보고서 데이터로 자동 계산됩니다
           </div>
         </>
       )}
