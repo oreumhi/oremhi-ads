@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { C } from '../config';
-import { fetchAdDataWindow, fetchMappingsAll } from '../store';
+import { fetchDiagGroups, fetchMappingsAll } from '../store';
 import { fmtWon, fmtNum, today } from '../utils';
 
 const card = { background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: 18, marginBottom: 16 };
@@ -27,24 +27,15 @@ const BASELINES = [
 ];
 const RECENTS = [[7, '최근 7일'], [14, '최근 14일'], [30, '최근 30일']];
 
-// 광고그룹 단위 합계
-//   매칭 키는 '광고그룹 이름'만 사용 — 캠페인 이름은 자주 바뀌어서(이모지·날짜) 시점 비교가 깨짐.
-//   (엑셀에서 광고그룹 단위로 대조하시던 방식과 동일)
-function aggByGroup(rows, mapByKey, brand) {
+const TOP_N = 20;   // 광고비 많이 쓴 상위 그룹만 진단
+
+// 서버 집계 결과(rows: group_name,campaign_name,cost,rev,conv,imp,clk) → 그룹명 키 맵
+function toGroupMap(rows) {
   const g = {};
-  rows.forEach(r => {
-    const mp = mapByKey[r.match_key];
-    if (!mp || mp.brand !== brand) return;
-    const grp = (r.group_name || '(그룹없음)').trim();
-    const key = grp;
-    const camp = r.campaign_name || mp.campaign || '';
-    const e = (g[key] = g[key] || { camp, grp, cost: 0, rev: 0, conv: 0, imp: 0, clk: 0 });
-    if (camp && !e.camp) e.camp = camp;
-    e.cost += +r.cost || 0;
-    e.rev += +(r.conv_revenue ?? r.revenue) || 0;
-    e.conv += +r.conversions || 0;
-    e.imp += +r.impressions || 0;
-    e.clk += +r.clicks || 0;
+  (rows || []).forEach(r => {
+    const key = (r.group_name || '(그룹없음)').trim();
+    g[key] = { camp: r.campaign_name || '', grp: key,
+      cost: +r.cost || 0, rev: +r.rev || 0, conv: +r.conv || 0, imp: +r.imp || 0, clk: +r.clk || 0 };
   });
   return g;
 }
@@ -89,16 +80,19 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
   const baseFrom = addDays(curFrom, -base.off), baseTo = addDays(curTo, -base.off);
 
   const run = useCallback(async () => {
-    if (!brand || !mappings.length) return;
+    if (!brand) return;
     setLoading(true);
     const [curRows, baseRows] = await Promise.all([
-      fetchAdDataWindow(curFrom, curTo, null),
-      fetchAdDataWindow(baseFrom, baseTo, null),
+      fetchDiagGroups(brand, curFrom, curTo),
+      fetchDiagGroups(brand, baseFrom, baseTo),
     ]);
-    const curG = aggByGroup(curRows, mapByKey, brand);
-    const baseG = aggByGroup(baseRows, mapByKey, brand);
-    const keys = new Set([...Object.keys(curG), ...Object.keys(baseG)]);
-    const groups = [...keys].map(k => {
+    const curG = toGroupMap(curRows);
+    const baseG = toGroupMap(baseRows);
+    // 광고비 많이 쓴 상위 20개 그룹만 (최근 또는 과거 기준 중 큰 쪽)
+    const topKeys = [...new Set([...Object.keys(curG), ...Object.keys(baseG)])]
+      .sort((a, b) => Math.max(curG[b]?.cost || 0, baseG[b]?.cost || 0) - Math.max(curG[a]?.cost || 0, baseG[a]?.cost || 0))
+      .slice(0, TOP_N);
+    const groups = topKeys.map(k => {
       const cur = curG[k], bs = baseG[k];
       return { key: k, camp: (cur || bs).camp, grp: (cur || bs).grp, cur, base: bs, dx: diagnose(cur, bs) };
     });
@@ -112,7 +106,7 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
     const sum = (g) => Object.values(g).reduce((a, e) => ({ cost: a.cost + e.cost, rev: a.rev + e.rev, conv: a.conv + e.conv }), { cost: 0, rev: 0, conv: 0 });
     setData({ groups, curTot: sum(curG), baseTot: sum(baseG), empty: !Object.keys(baseG).length });
     setLoading(false);
-  }, [brand, mappings, mapByKey, curFrom, curTo, baseFrom, baseTo]);
+  }, [brand, curFrom, curTo, baseFrom, baseTo]);
   useEffect(() => { run(); }, [run]);
 
   const arrow = (v, invGood) => {
@@ -166,9 +160,9 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
 
           <div style={card}>
             <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
-              광고그룹별 변화 <span style={{ fontSize: 11.5, color: C.txd, fontWeight: 400 }}>· 최근 {curFrom}~{curTo} vs {base.label} {baseFrom}~{baseTo}</span>
+              광고그룹별 변화 <span style={{ fontSize: 11.5, color: C.txd, fontWeight: 400 }}>· 광고비 상위 {TOP_N}개 · 최근 {curFrom}~{curTo} vs {base.label} {baseFrom}~{baseTo}</span>
             </div>
-            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>매출이 많이 빠진 그룹이 맨 위입니다 · 진단은 매출·ROAS·광고비 변화를 함께 보고 원인을 추정합니다</div>
+            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>광고비를 많이 쓴 그룹 중 매출이 많이 빠진 순서입니다 · 진단은 매출·ROAS·광고비 변화를 함께 보고 원인을 추정합니다</div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
                 <thead>
@@ -181,7 +175,7 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.groups.filter(g => (g.cur?.cost > 500 || g.base?.cost > 500)).map(g => {
+                  {data.groups.map(g => {
                     const cR = g.cur ? roasOf(g.cur) : null, bR = g.base ? roasOf(g.base) : null;
                     return (
                       <tr key={g.key}>
