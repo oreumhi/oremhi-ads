@@ -523,6 +523,14 @@ export function useStore(currentUser) {
   return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange };
 }
 
+// ─── 하락 진단: 브랜드의 광고그룹별 합계 (서버 집계 — 수십 줄만 내려옴) ───
+export async function fetchDiagGroups(brand, fromDate, toDate) {
+  if (!sb || !brand) return [];
+  const { data, error } = await sb.rpc('diag_groups', { p_brand: brand, p_from: fromDate, p_to: toDate });
+  if (error) { console.error('[diag_groups]', error.message); return []; }
+  return data || [];
+}
+
 // ─── 브랜드 목표·YOY 기준치 (담당자 기재) ───
 export async function fetchBrandTargets() {
   if (!sb) return [];
