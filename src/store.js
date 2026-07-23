@@ -570,6 +570,15 @@ export async function fetchAdDaily(rangeDays, ownerId) {
   });
 }
 
+// 집계 테이블 임의 구간 조회 (YOY: 작년 동기간 등)
+export async function fetchAdDailyWindow(fromDate, toDate) {
+  if (!sb) return [];
+  return await fetchPagedParallel((p, size) => sb.from('ad_daily').select('*')
+    .gte('date', fromDate).lte('date', toDate)
+    .order('date', { ascending: true }).order('id', { ascending: true })
+    .range(p * size, p * size + size - 1));
+}
+
 // 원본 상세 조회 (기간 한정 + 필요한 컬럼만 → 전송량 절감)
 export async function fetchAdDataWindow(fromDate, toDate, ownerId) {
   if (!sb) return [];
