@@ -27,16 +27,19 @@ const BASELINES = [
 ];
 const RECENTS = [[7, '최근 7일'], [14, '최근 14일'], [30, '최근 30일']];
 
-// 광고그룹 단위 합계 (캠페인+광고그룹으로 구분)
+// 광고그룹 단위 합계
+//   매칭 키는 '광고그룹 이름'만 사용 — 캠페인 이름은 자주 바뀌어서(이모지·날짜) 시점 비교가 깨짐.
+//   (엑셀에서 광고그룹 단위로 대조하시던 방식과 동일)
 function aggByGroup(rows, mapByKey, brand) {
   const g = {};
   rows.forEach(r => {
     const mp = mapByKey[r.match_key];
     if (!mp || mp.brand !== brand) return;
+    const grp = (r.group_name || '(그룹없음)').trim();
+    const key = grp;
     const camp = r.campaign_name || mp.campaign || '';
-    const grp = r.group_name || '(그룹없음)';
-    const key = camp + ' ▸ ' + grp;
     const e = (g[key] = g[key] || { camp, grp, cost: 0, rev: 0, conv: 0, imp: 0, clk: 0 });
+    if (camp && !e.camp) e.camp = camp;
     e.cost += +r.cost || 0;
     e.rev += +(r.conv_revenue ?? r.revenue) || 0;
     e.conv += +r.conversions || 0;
