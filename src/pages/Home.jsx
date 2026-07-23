@@ -218,13 +218,13 @@ function HeroHeader({ adData, allowedBrands, userName }) {
       <div style={{ position: 'absolute', top: -60, right: -40, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle, #5b8def22, transparent 70%)' }} />
       <div style={{ fontSize: 12.5, color: '#aab3d0', marginBottom: 3 }}>{greet}, <b style={{ color: '#fff' }}>{userName}</b>님</div>
       <div style={{ fontSize: 11, color: '#7683a8', marginBottom: 14 }}>
-        어제 {dayLabel(y1)} {allowedBrands ? '담당 브랜드' : '회사 전체'} 성과
+        어제 {dayLabel(y1)} {allowedBrands ? '담당 브랜드' : '회사 전체'} 성과 <span style={{ color: '#5c6685' }}>· 전환·매출·ROAS는 구매완료 기준</span>
       </div>
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
         {box('광고비', won(m1.cost), delta(m1.cost, m2.cost))}
-        {box('매출(전환)', won(m1.rev), delta(m1.rev, m2.rev))}
-        {box('ROAS', Math.round(r1) + '%', r2 > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: r1 >= r2 ? C.ok : C.no }}>{r1 >= r2 ? '▲' : '▼'} {Math.round(Math.abs(r1 - r2))}%p</span> : null)}
-        {box('전환수', fmtNum(m1.conv) + '건', delta(m1.conv, m2.conv))}
+        {box('구매완료 매출', won(m1.rev), delta(m1.rev, m2.rev))}
+        {box('구매완료 ROAS', Math.round(r1) + '%', r2 > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: r1 >= r2 ? C.ok : C.no }}>{r1 >= r2 ? '▲' : '▼'} {Math.round(Math.abs(r1 - r2))}%p</span> : null)}
+        {box('구매완료 전환수', fmtNum(m1.conv) + '건', delta(m1.conv, m2.conv))}
       </div>
     </div>
   );
