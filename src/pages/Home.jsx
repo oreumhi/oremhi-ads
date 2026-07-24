@@ -54,6 +54,7 @@ const Dot = ({ color, title }) => (
 function NoticeBoard({ currentUser, isAdmin }) {
   const [notices, setNotices] = useState([]);
   const [replies, setReplies] = useState([]);
+  const [members, setMembers] = useState([]);    // 전 직원(대표 포함) — 확인 여부 표시용
   const [draft, setDraft] = useState('');
   const [comment, setComment] = useState({});   // notice_id → 입력값
   const [busy, setBusy] = useState(false);
@@ -71,6 +72,7 @@ function NoticeBoard({ currentUser, isAdmin }) {
     setNotices(ns || []); setReplies(rs);
   }, []);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { fetchUsers().then(us => setMembers((us || []).sort((a, b) => (a.role === 'admin' ? -1 : 1) - (b.role === 'admin' ? -1 : 1)))); }, []);
 
   const post = async () => {
     const text = draft.trim();
@@ -146,17 +148,28 @@ function NoticeBoard({ currentUser, isAdmin }) {
               </div>
               <div style={{ fontSize: 10.5, color: C.txm, marginTop: 6 }}>{n.created_by || '관리자'} · {timeAgo(n.created_at)}</div>
 
-              {/* 확인 체크 */}
-              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                <button onClick={() => toggleAck(n)} style={{
-                  background: iAcked ? '#3dd9a022' : C.sf3, border: `1px solid ${iAcked ? C.ok : C.bd}`, borderRadius: 20,
-                  padding: '4px 13px', color: iAcked ? C.ok : C.txd, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
-                }}>{iAcked ? '✔ 확인함' : '확인했어요'}</button>
-                {acks.map(r => (
-                  <span key={r.id} style={{ fontSize: 10.5, color: C.ok, background: '#3dd9a014', border: '1px solid #3dd9a033', borderRadius: 10, padding: '2px 9px' }}>✔ {r.user_name}</span>
-                ))}
-                {!acks.length && <span style={{ fontSize: 10.5, color: C.txm }}>아직 확인한 사람이 없습니다</span>}
-              </div>
+              {/* 확인 체크 — 확인한 사람은 초록, 아직 안 한 사람은 회색 '미확인' */}
+              {(() => {
+                const ackedIds = new Set(acks.map(r => r.user_id));
+                const roster = members.length ? members : acks.map(r => ({ id: r.user_id, name: r.user_name }));
+                const confirmed = roster.filter(m => ackedIds.has(m.id));
+                const pending = roster.filter(m => !ackedIds.has(m.id));
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                    <button onClick={() => toggleAck(n)} style={{
+                      background: iAcked ? '#3dd9a022' : C.sf3, border: `1px solid ${iAcked ? C.ok : C.bd}`, borderRadius: 20,
+                      padding: '4px 13px', color: iAcked ? C.ok : C.txd, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                    }}>{iAcked ? '✔ 확인함' : '확인했어요'}</button>
+                    <span style={{ fontSize: 10, color: C.txm, marginLeft: 2 }}>확인 {confirmed.length}/{roster.length}</span>
+                    {confirmed.map(m => (
+                      <span key={'c' + m.id} style={{ fontSize: 10.5, color: C.ok, background: '#3dd9a014', border: '1px solid #3dd9a033', borderRadius: 10, padding: '2px 9px' }}>✔ {m.name}</span>
+                    ))}
+                    {pending.map(m => (
+                      <span key={'p' + m.id} style={{ fontSize: 10.5, color: C.txm, background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 10, padding: '2px 9px' }}>{m.name} 미확인</span>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* 댓글 */}
               {cmts.length > 0 && (
