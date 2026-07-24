@@ -525,10 +525,14 @@ export function useStore(currentUser) {
 
 // ─── 하락 진단: 브랜드의 광고그룹별 합계 (서버 집계 — 수십 줄만 내려옴) ───
 export async function fetchDiagGroups(brand, fromDate, toDate) {
-  if (!sb || !brand) return [];
-  const { data, error } = await sb.rpc('diag_groups', { p_brand: brand, p_from: fromDate, p_to: toDate });
-  if (error) { console.error('[diag_groups]', error.message); return []; }
-  return data || [];
+  if (!sb || !brand) return { rows: [], ok: true };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await sb.rpc('diag_groups', { p_brand: brand, p_from: fromDate, p_to: toDate });
+    if (!error) return { rows: data || [], ok: true };
+    console.error('[diag_groups]', error.message, '(재시도', attempt + 1, ')');
+    await new Promise(r => setTimeout(r, 900));
+  }
+  return { rows: [], ok: false };   // ok:false = 조회 실패(≠ 데이터 없음)
 }
 
 // ─── 브랜드 목표·YOY 기준치 (담당자 기재) ───
