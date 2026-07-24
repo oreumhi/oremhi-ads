@@ -88,29 +88,29 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
   const run = useCallback(async () => {
     if (!brand) return;
     setLoading(true);
-    const [curRows, baseRows] = await Promise.all([
+    const [curRes, baseRes] = await Promise.all([
       fetchDiagGroups(brand, curFrom, curTo),
       fetchDiagGroups(brand, baseFrom, baseTo),
     ]);
-    const curG = toGroupMap(curRows);
-    const baseG = toGroupMap(baseRows);
-    // 광고비 많이 쓴 상위 20개 그룹만 (최근 또는 과거 기준 중 큰 쪽)
+    const curG = toGroupMap(curRes.rows);
+    const baseG = toGroupMap(baseRes.rows);
+    // 광고비 많이 쓴 상위 20개 그룹 (최근 광고비 기준, 없으면 과거)
+    const costOf = (k) => Math.max(curG[k]?.cost || 0, baseG[k]?.cost || 0);
     const topKeys = [...new Set([...Object.keys(curG), ...Object.keys(baseG)])]
-      .sort((a, b) => Math.max(curG[b]?.cost || 0, baseG[b]?.cost || 0) - Math.max(curG[a]?.cost || 0, baseG[a]?.cost || 0))
+      .sort((a, b) => costOf(b) - costOf(a))
       .slice(0, TOP_N);
     const groups = topKeys.map(k => {
       const cur = curG[k], bs = baseG[k];
       return { key: k, camp: (cur || bs).camp, grp: (cur || bs).grp, cur, base: bs, dx: diagnose(cur, bs) };
     });
-    // 매출 하락액이 큰 순 (범인 위로) → 그 외는 최근 매출 순
-    groups.sort((a, b) => {
-      const da = (a.base?.rev || 0) - (a.cur?.rev || 0);
-      const db = (b.base?.rev || 0) - (b.cur?.rev || 0);
-      if (db !== da) return db - da;
-      return (b.cur?.rev || 0) - (a.cur?.rev || 0);
-    });
+    // 표시 순서: 광고비 많이 쓴 순 (최근 기준) — 사용자가 광고비 상위부터 훑도록
+    groups.sort((a, b) => costOf(b.key) - costOf(a.key));
     const sum = (g) => Object.values(g).reduce((a, e) => ({ cost: a.cost + e.cost, rev: a.rev + e.rev, conv: a.conv + e.conv }), { cost: 0, rev: 0, conv: 0 });
-    setData({ groups, curTot: sum(curG), baseTot: sum(baseG), empty: !Object.keys(baseG).length });
+    setData({
+      groups, curTot: sum(curG), baseTot: sum(baseG),
+      empty: !Object.keys(baseG).length,
+      baseFailed: !baseRes.ok, curFailed: !curRes.ok,
+    });
     setLoading(false);
   }, [brand, curFrom, curTo, baseFrom, baseTo]);
   useEffect(() => { run(); }, [run]);
@@ -157,7 +157,11 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
             ))}
           </div>
 
-          {data.empty && (
+          {(data.baseFailed || data.curFailed) ? (
+            <div style={{ ...card, fontSize: 12.5, color: C.no, lineHeight: 1.7 }}>
+              ⚠ 데이터 조회에 실패했습니다 (일시적 오류). 잠시 후 브랜드를 다시 선택하거나 기간 버튼을 눌러 재시도해주세요.
+            </div>
+          ) : data.empty && (
             <div style={{ ...card, fontSize: 12.5, color: C.warn, lineHeight: 1.7 }}>
               ⚠ {base.label}({baseFrom}~{baseTo}) 데이터가 아직 없습니다.
               {baseKey === 'yoy' ? ' 작년 데이터 백필이 완료되면 자동으로 채워집니다. 우선 1·3·6개월 전으로 비교해보세요.' : ' 이 기간의 보고서가 수집되지 않았습니다.'}
@@ -168,7 +172,7 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
             <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
               광고그룹별 변화 <span style={{ fontSize: 11.5, color: C.txd, fontWeight: 400 }}>· 광고비 상위 {TOP_N}개 · 최근 {curFrom}~{curTo} vs {base.label} {baseFrom}~{baseTo}</span>
             </div>
-            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>광고비를 많이 쓴 그룹 중 매출이 많이 빠진 순서입니다 · 진단은 매출·ROAS·광고비 변화를 함께 보고 원인을 추정합니다</div>
+            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>광고비를 많이 쓴 순서로 나열됩니다 · '진단' 열에서 매출·ROAS가 빠진 그룹을 표시합니다</div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
                 <thead>
