@@ -471,6 +471,7 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     // 순위: 제품별 최신 + 전일
     const rankByProduct = {};
     D.rankHist.forEach(h => {
+      if ((h.product || '').includes('예시')) return;   // [예시] 테스트 상품은 알림·신호등에서 제외
       const k = `${h.brand}·${h.product || ''}·${h.keyword}·${h.ad_type || ''}`;
       const day = (h.collected_at || '').slice(0, 10);
       const e = (rankByProduct[k] = rankByProduct[k] || { brand: h.brand, keyword: h.keyword, product: h.product, days: {} });
