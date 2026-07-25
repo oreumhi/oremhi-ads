@@ -81,7 +81,8 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
   }, [brands, brand]);
 
   const base = BASELINES.find(b => b.key === baseKey);
-  const t = today();
+  // 오늘은 수집이 진행 중이라 데이터가 불완전 → 항상 '어제'를 마지막 날로 씁니다.
+  const t = addDays(today(), -1);
   const curFrom = addDays(t, -(recentN - 1)), curTo = t;
   const baseFrom = addDays(curFrom, -base.off), baseTo = addDays(curTo, -base.off);
 
@@ -103,8 +104,11 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
       const cur = curG[k], bs = baseG[k];
       return { key: k, camp: (cur || bs).camp, grp: (cur || bs).grp, cur, base: bs, dx: diagnose(cur, bs) };
     });
-    // 표시 순서: 광고비 많이 쓴 순 (최근 기준) — 사용자가 광고비 상위부터 훑도록
-    groups.sort((a, b) => costOf(b.key) - costOf(a.key));
+    // 표시 순서: '최근' 광고비 많이 쓴 순 내림차순 (100만→90만→80만…)
+    //   ※ 상위 20개를 고를 때는 과거 광고비도 참고(과거에 많이 쓰다 끊긴 그룹도 진단 대상),
+    //     화면에 뿌릴 때는 오로지 최근 광고비 기준으로 내림차순 정렬합니다.
+    const curCost = (k) => curG[k]?.cost || 0;
+    groups.sort((a, b) => (curCost(b.key) - curCost(a.key)) || (costOf(b.key) - costOf(a.key)));
     const sum = (g) => Object.values(g).reduce((a, e) => ({ cost: a.cost + e.cost, rev: a.rev + e.rev, conv: a.conv + e.conv }), { cost: 0, rev: 0, conv: 0 });
     setData({
       groups, curTot: sum(curG), baseTot: sum(baseG),
@@ -172,7 +176,7 @@ export default function Diagnosis({ currentUser, allowedBrands }) {
             <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
               광고그룹별 변화 <span style={{ fontSize: 11.5, color: C.txd, fontWeight: 400 }}>· 광고비 상위 {TOP_N}개 · 최근 {curFrom}~{curTo} vs {base.label} {baseFrom}~{baseTo}</span>
             </div>
-            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>광고비를 많이 쓴 순서로 나열됩니다 · '진단' 열에서 매출·ROAS가 빠진 그룹을 표시합니다</div>
+            <div style={{ fontSize: 11, color: C.txm, marginBottom: 10 }}>최근 광고비가 큰 순서(내림차순)로 나열됩니다 · 오늘({today()})은 수집이 진행 중이라 제외하고 어제까지로 집계합니다 · '진단' 열에서 매출·ROAS가 빠진 그룹을 표시합니다</div>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
                 <thead>
