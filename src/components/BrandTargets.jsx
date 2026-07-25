@@ -38,13 +38,24 @@ export default function BrandTargets({ brands, allowedBrands, currentUser }) {
   const [msg, setMsg] = useState('');
   const [open, setOpen] = useState(false);
 
-  const load = useCallback(async () => setTargets(await fetchBrandTargets()), []);
+  const [loaded, setLoaded] = useState(false);
+  const [autoOpened, setAutoOpened] = useState(false);
+  const load = useCallback(async () => { setTargets(await fetchBrandTargets()); setLoaded(true); }, []);
   useEffect(() => { load(); }, [load]);
 
   const canSee = (b) => !allowedBrands || allowedBrands.includes(b);
+  const isAdmin = currentUser?.role === 'admin';
   const myTargets = targets.filter(t => canSee(t.brand));
   const registered = new Set(targets.map(t => t.brand));
   const addable = (brands || []).filter(b => !registered.has(b) && canSee(b)).sort();
+
+  // 아직 목표를 하나도 안 넣은 사람에게는 처음부터 펼쳐서 보여줍니다
+  //   (직원분들이 '설정' 안에 접혀 있는 걸 못 찾는 일이 없도록)
+  useEffect(() => {
+    if (!loaded || autoOpened) return;
+    setAutoOpened(true);
+    if (myTargets.length === 0 && addable.length > 0) setOpen(true);
+  }, [loaded, autoOpened, myTargets.length, addable.length]);
 
   const startEdit = (t) => {
     setEdit(e => ({ ...e, [t.brand]: Object.fromEntries(FIELDS.map(([k]) => [k, disp(t[k])])) }));
@@ -87,6 +98,11 @@ export default function BrandTargets({ brands, allowedBrands, currentUser }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 14, fontWeight: 700 }}>🎯 브랜드 목표 관리</div>
         <span style={{ fontSize: 11, color: C.txm }}>목표·작년 동기 기준을 적으면 홈 경고와 신호등, 리포트가 이 기준으로 판단합니다</span>
+        {!isAdmin && (
+          <span style={{ fontSize: 10.5, color: C.ok, background: C.ok + '18', border: `1px solid ${C.ok}44`, borderRadius: 999, padding: '2px 9px', fontWeight: 700 }}>
+            담당 브랜드는 직접 등록·수정할 수 있습니다
+          </span>
+        )}
         <button onClick={() => setOpen(o => !o)} style={{ marginLeft: 'auto', background: 'none', border: `1px solid ${C.bd}`, borderRadius: 7, padding: '4px 11px', color: C.txd, fontSize: 11, cursor: 'pointer' }}>
           {open ? '접기 ▲' : `펼치기 ▼ (${myTargets.length}개 등록됨)`}
         </button>
