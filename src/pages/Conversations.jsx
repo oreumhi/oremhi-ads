@@ -462,6 +462,7 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
   const [selStaff, setSelStaff] = useState('all');           // 관리자용 직원 필터
   const [ym, setYm] = useState(todayStr().slice(0, 7));       // 'YYYY-MM'
   const [selDay, setSelDay] = useState(null);
+  const [showResolved, setShowResolved] = useState(false);    // 해소된 침묵 경고 보기
 
   useEffect(() => {
     (async () => {
@@ -471,8 +472,23 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
   }, [isAdmin, ownerId]);
 
   // 관리자 필터 적용
-  const visNotes = notes.filter(n => selStaff === 'all' || n.owner_id === selStaff);
+  const allNotes = notes.filter(n => selStaff === 'all' || n.owner_id === selStaff);
   const visUploads = (uploads || []).filter(u => (selStaff === 'all' || u.owner_id === selStaff));
+
+  // ── 이미 해소된 '침묵 경고'는 감춥니다 ──
+  //   "마지막 대화가 N일 전입니다" 메모는 그날 기준으로는 맞지만,
+  //   이후에 대화가 재개되면 사실과 달라 보입니다. 그래서 그 광고주의
+  //   마지막 대화일이 메모 날짜보다 뒤면 '해소됨'으로 보고 기본 숨김 처리합니다.
+  const lastByClient = {};
+  for (const u of visUploads) {
+    if (!u.last_date) continue;
+    if (!lastByClient[u.client_name] || u.last_date > lastByClient[u.client_name])
+      lastByClient[u.client_name] = u.last_date;
+  }
+  const isSilenceNote = (n) => /마지막 대화가\s*\d+일 전/.test(n.note || '');
+  const isResolved = (n) => isSilenceNote(n) && (lastByClient[n.client_name] || '') > n.date;
+  const resolvedCount = allNotes.filter(isResolved).length;
+  const visNotes = showResolved ? allNotes : allNotes.filter(n => !isResolved(n));
 
   // ── 브랜드별 마지막 대화일 → 무응답 경고 계산 ──
   const lastTalk = {}; // key: owner||client → { date, staffName, client }
@@ -519,8 +535,9 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
     setSelDay(null);
   };
 
-  const chipColor = (n) => n.kind === '경고' ? C.no : (KIND_COLOR[n.kind] || C.yel);
-  const chipLabel = (n) => (isAdmin && selStaff === 'all' ? `[${n.staff_name}] ` : '') + `${n.client_name}: ${n.note}`;
+  const chipColor = (n) => isResolved(n) ? C.txm : (n.kind === '경고' ? C.no : (KIND_COLOR[n.kind] || C.yel));
+  const chipLabel = (n) => (isResolved(n) ? '✔ ' : '') + (isAdmin && selStaff === 'all' ? `[${n.staff_name}] ` : '')
+    + `${n.client_name}: ${n.note}` + (isResolved(n) ? ` (해소됨 — ${lastByClient[n.client_name]}에 대화 재개)` : '');
 
   return (
     <div style={card}>
@@ -532,6 +549,13 @@ function CalendarSection({ isAdmin, ownerId, uploads, staff }) {
               <option value="all">전체 직원</option>
               {(staff || []).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
+          )}
+          {resolvedCount > 0 && (
+            <button style={{ ...btnGhost, color: showResolved ? C.ac : C.txm, borderColor: showResolved ? C.ac + '55' : C.bd }}
+              title="대화가 다시 시작되어 이미 해결된 '오래 침묵' 알림입니다"
+              onClick={() => setShowResolved(v => !v)}>
+              {showResolved ? '해소된 알림 숨기기' : `해소된 알림 보기 (${resolvedCount})`}
+            </button>
           )}
           <button style={btnGhost} onClick={() => moveMonth(-1)}>◀</button>
           <span style={{ fontSize: 14, fontWeight: 700 }}>{Y}년 {M}월</span>
