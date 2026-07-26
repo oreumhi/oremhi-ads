@@ -535,6 +535,24 @@ export async function fetchDiagGroups(brand, fromDate, toDate) {
   return { rows: [], ok: false };   // ok:false = 조회 실패(≠ 데이터 없음)
 }
 
+// ─── 스케일업 발굴 (순위를 올리면 더 팔릴 것 같은 파워링크 키워드) ───
+export async function fetchScaleupBrands() {
+  if (!sb) return [];
+  const { data, error } = await sb.rpc('scaleup_brands');
+  if (error) { console.error('[scaleup_brands]', error.message); return []; }
+  return data || [];
+}
+export async function fetchScaleupKeywords(brand, fromDate, toDate) {
+  if (!sb || !brand) return { rows: [], ok: true };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await sb.rpc('scaleup_keywords', { p_brand: brand, p_from: fromDate, p_to: toDate });
+    if (!error) return { rows: data || [], ok: true };
+    console.error('[scaleup_keywords]', error.message, '(재시도', attempt + 1, ')');
+    await new Promise(r => setTimeout(r, 900));
+  }
+  return { rows: [], ok: false };
+}
+
 // ─── 브랜드 목표·YOY 기준치 (담당자 기재) ───
 export async function fetchBrandTargets() {
   if (!sb) return [];
