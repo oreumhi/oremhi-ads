@@ -700,6 +700,8 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
       dataJob('순위체크', '03:40', rankToday > 0, '', rankToday > 0 ? `오늘 ${rankToday}건 수집` : '오늘 수집 기록 없음'),
       dataJob('보고서 수집·집계', '04시대', reportOk, '', reportOk ? '어제 데이터 반영 완료' : '어제 데이터 미반영'),
       dataJob('대화 수집·분석', '새벽', chatToday > 0, '', chatToday > 0 ? `오늘 ${chatToday}개 방 수집` : '오늘 수집 기록 없음'),
+      // 업무보고 카톡 전송 — 실패하면 여기 불이 빨갛게 바뀝니다 (공지사항에는 올리지 않습니다)
+      hbJob('업무보고(2시간)', '10~22시'),
     ];
 
     return { rows, todos, jobs };
