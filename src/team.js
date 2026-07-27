@@ -219,16 +219,29 @@ export async function fetchTodayPromises(dateStr) {
   return data || [];
 }
 
-// 사진 업로드 → 공개 URL 반환
+// 첨부 업로드 → 공개 URL 반환
+//   2026-07-27: 사진만 되던 것을 엑셀·PDF 등 모든 파일로 확장했습니다.
+//   확장자를 jpg/png로 강제하던 부분이 원인이라, 원래 확장자를 그대로 살립니다.
+const MIME = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel', xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  csv: 'text/csv', pdf: 'application/pdf', zip: 'application/zip',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+};
+
 export async function uploadAttachment(blob, filename) {
   if (!sb) return null;
-  const ext = (filename || 'photo.jpg').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const name = filename || 'file';
+  const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
   const ym = new Date().toISOString().slice(0, 7);
-  const path = `${ym}/${uid()}.${ext === 'png' ? 'png' : 'jpg'}`;
+  const path = `${ym}/${uid()}.${ext}`;
   const { error } = await sb.storage.from('attachments').upload(path, blob, {
-    contentType: blob.type || 'image/jpeg', upsert: true,
+    contentType: blob.type || MIME[ext] || 'application/octet-stream',
+    upsert: true,
   });
   if (error) { console.error('[storage] 업로드:', error.message); return null; }
   const { data } = sb.storage.from('attachments').getPublicUrl(path);
-  return { url: data.publicUrl, path, name: filename || 'photo.jpg' };
+  return { url: data.publicUrl, path, name, size: blob.size || 0, ext };
 }
