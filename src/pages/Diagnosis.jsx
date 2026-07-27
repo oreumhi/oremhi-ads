@@ -49,8 +49,27 @@ function diagnose(cur, base) {
   const revChg = pct(cur.rev, base.rev);
   const costChg = pct(cur.cost, base.cost);
   const cR = roasOf(cur), bR = roasOf(base);
-  if (revChg >= -10) return { s: 'ok', t: revChg >= 15 ? '🟢 성장' : '🟢 유지', c: C.ok };
-  // 매출이 빠졌다 → 원인 분류
+  const roasChg = pct(cR, bR);          // ROAS가 몇 % 변했나 (325%→263% 이면 -19%)
+
+  // ── 매출이 유지되거나 늘어난 경우 ──
+  //   ※ 2026-07-27 수정: 예전에는 매출만 보고 '성장/유지'라고 했습니다.
+  //     그래서 광고비를 52% 더 써서 매출 28% 늘리고 ROAS가 321%→270%로 빠진 그룹도
+  //     '성장'으로 표시돼 수치와 말이 맞지 않았습니다. 이제 효율(ROAS)을 함께 봅니다.
+  if (revChg >= -10) {
+    if (roasChg < -15) {
+      // 효율이 눈에 띄게 빠졌다 → 매출이 늘었어도 그냥 넘길 수 없다
+      return revChg >= 15
+        ? { s: 'warn', t: '🟡 매출↑ 이지만 효율 하락', c: C.yel }
+        : { s: 'warn', t: '🟡 매출 제자리·효율 하락', c: C.yel };
+    }
+    if (revChg >= 15) {
+      // 매출도 늘고 효율도 지켰다 → 진짜 성장
+      return { s: 'ok', t: roasChg >= 10 ? '🟢 성장 (효율도 개선)' : '🟢 성장', c: C.ok };
+    }
+    return { s: 'ok', t: '🟢 유지', c: C.ok };
+  }
+
+  // ── 매출이 빠진 경우 → 원인 분류 ──
   if (cR < bR * 0.8 && costChg >= -15) return { s: 'bad', t: '🔴 효율 급락 (돈 쓰고 안 팔림)', c: C.no };
   if (costChg <= -25 && cR >= bR * 0.9) return { s: 'cut', t: '🟡 광고 축소로 매출만 감소', c: C.yel };
   if (cur.imp < base.imp * 0.7 && cR >= bR * 0.9) return { s: 'imp', t: '🟡 노출 감소 (효율은 유지)', c: C.yel };
