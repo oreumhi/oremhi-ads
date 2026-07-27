@@ -46,37 +46,80 @@ function Section({ title, sub, right, children }) {
   );
 }
 
-// ─── 사진 첨부 공용 (일일보고·회의록에서 사용, 여러 장 가능) ───
+// ─── 첨부 공용 (일일보고·회의록에서 사용 — 사진과 파일 모두) ───
+const isImageAtt = (a) => {
+  const n = (a?.name || '').toLowerCase();
+  const e = (a?.ext || n.split('.').pop() || '').toLowerCase();
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(e);
+};
+const fileIcon = (a) => {
+  const e = (a?.ext || (a?.name || '').split('.').pop() || '').toLowerCase();
+  if (['xlsx', 'xls', 'xlsm', 'csv'].includes(e)) return '📊';
+  if (e === 'pdf') return '📕';
+  if (['doc', 'docx', 'hwp', 'hwpx', 'txt'].includes(e)) return '📄';
+  if (['ppt', 'pptx'].includes(e)) return '📈';
+  if (['zip', 'rar', '7z'].includes(e)) return '🗜';
+  return '📎';
+};
+const fmtSize = (n) => !n ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1024))}KB`;
+
 function AttachThumbs({ atts, onRemove }) {
   if (!atts || atts.length === 0) return null;
+  const imgs = atts.map((a, i) => ({ a, i })).filter(x => isImageAtt(x.a));
+  const docs = atts.map((a, i) => ({ a, i })).filter(x => !isImageAtt(x.a));
+  const delBtn = (i, tip) => onRemove && (
+    <span onClick={() => onRemove(i)} title={tip}
+      style={{ position: 'absolute', top: -6, right: -6, background: C.no, color: '#fff', borderRadius: '50%',
+        width: 18, height: 18, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', fontWeight: 800 }}>✕</span>
+  );
   return (
-    <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-      {atts.map((a, i) => (
-        <div key={i} style={{ position: 'relative' }}>
-          <img src={a.url} alt={a.name} title={a.name}
-            style={{ height: 64, borderRadius: 6, cursor: 'pointer', border: `1px solid ${C.bd}` }}
-            onClick={() => window.open(a.url, '_blank')} />
-          {onRemove && (
-            <span onClick={() => onRemove(i)} title="사진 삭제 (저장해야 반영)"
-              style={{ position: 'absolute', top: -6, right: -6, background: C.no, color: '#fff', borderRadius: '50%',
-                width: 18, height: 18, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', fontWeight: 800 }}>✕</span>
-          )}
+    <>
+      {imgs.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+          {imgs.map(({ a, i }) => (
+            <div key={i} style={{ position: 'relative' }}>
+              <img src={a.url} alt={a.name} title={a.name}
+                style={{ height: 64, borderRadius: 6, cursor: 'pointer', border: `1px solid ${C.bd}` }}
+                onClick={() => window.open(a.url, '_blank')} />
+              {delBtn(i, '사진 삭제 (저장해야 반영)')}
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      )}
+      {docs.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+          {docs.map(({ a, i }) => (
+            <div key={i} style={{ position: 'relative' }}>
+              <a href={a.url} target="_blank" rel="noreferrer" download={a.name} title={`${a.name} 내려받기`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none',
+                  background: C.sf2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '7px 11px',
+                  color: C.tx, fontSize: 12, maxWidth: 260 }}>
+                <span style={{ fontSize: 15 }}>{fileIcon(a)}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                {a.size ? <span style={{ color: C.txm, fontSize: 10.5, flexShrink: 0 }}>{fmtSize(a.size)}</span> : null}
+              </a>
+              {delBtn(i, '파일 삭제 (저장해야 반영)')}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
+// 사진 + 파일(엑셀·PDF 등) 모두 첨부할 수 있는 입력칸
 function PhotoInput({ files, setFiles }) {
+  const imgN = files.filter(f => (f.type || '').startsWith('image/')).length;
+  const docN = files.length - imgN;
   return (
     <div>
-      <div style={label}>📷 사진 첨부 (여러 장 가능 — 자동으로 용량을 줄여 저장합니다)</div>
-      <input type="file" accept="image/*" multiple style={{ fontSize: 13, color: C.txd }}
+      <div style={label}>📎 파일 첨부 — 사진·엑셀·PDF 무엇이든 (여러 개 가능 · 사진은 자동으로 용량을 줄입니다)</div>
+      <input type="file" multiple style={{ fontSize: 13, color: C.txd }}
         onChange={e => { const add = Array.from(e.target.files || []); if (add.length) setFiles(prev => [...prev, ...add]); e.target.value = ''; }} />
       {files.length > 0 && (
         <span style={{ fontSize: 12, color: C.ok, marginLeft: 8 }}>
-          {files.length}장 선택됨
+          {imgN > 0 && `사진 ${imgN}장`}{imgN > 0 && docN > 0 && ' · '}{docN > 0 && `파일 ${docN}개`} 선택됨
           <span style={{ color: C.no, cursor: 'pointer', marginLeft: 8 }} onClick={() => setFiles([])}>비우기</span>
         </span>
       )}
@@ -84,13 +127,20 @@ function PhotoInput({ files, setFiles }) {
   );
 }
 
-// 선택된 파일들을 압축 → 업로드 → 첨부 목록 반환
+// 선택한 것들을 업로드 → 첨부 목록 반환
+//   · 사진이면 압축해서, 그 외 파일(엑셀 등)은 원본 그대로 올립니다
+const MAX_FILE_MB = 25;
 async function uploadFiles(files) {
   const atts = [];
   for (const f of files) {
-    const blob = await compressImage(f);
+    const isImg = (f.type || '').startsWith('image/');
+    if (!isImg && f.size > MAX_FILE_MB * 1048576) {
+      alert(`"${f.name}" 은 ${MAX_FILE_MB}MB를 넘어 올릴 수 없습니다.`);
+      continue;
+    }
+    const blob = isImg ? await compressImage(f) : f;
     const up = await uploadAttachment(blob, f.name);
-    if (up) atts.push(up); else alert(`사진 업로드 실패: ${f.name}`);
+    if (up) atts.push(up); else alert(`업로드 실패: ${f.name}`);
   }
   return atts;
 }
@@ -397,7 +447,7 @@ function MeetingsView({ users, currentUser, isAdmin }) {
             </div>
             <textarea style={{ ...ta, minHeight: 100 }} placeholder={"논의 내용을 적으세요.\n결정된 할 일은 저장 후 아래 '액션아이템'에 담당자·기한과 함께 추가하세요."} value={newM.notes} onChange={e => setNewM(m => ({ ...m, notes: e.target.value }))} />
             <div style={{ marginTop: 8 }}><PhotoInput files={newFiles} setFiles={setNewFiles} /></div>
-            <div style={{ marginTop: 8 }}><button style={btnAc} disabled={busy} onClick={createMeeting}>{busy ? '사진 올리는 중…' : '회의록 저장'}</button></div>
+            <div style={{ marginTop: 8 }}><button style={btnAc} disabled={busy} onClick={createMeeting}>{busy ? '올리는 중…' : '회의록 저장'}</button></div>
           </div>
         )}
         {meetings.length === 0 && !creating ? <div style={{ color: C.txd, fontSize: 13 }}>회의록이 없습니다. '+ 새 회의록'으로 시작하세요.</div> :
@@ -421,7 +471,7 @@ function MeetingsView({ users, currentUser, isAdmin }) {
                     <AttachThumbs atts={editAtts} onRemove={i => setEditAtts(a => a.filter((_, j) => j !== i))} />
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button style={btnAc} disabled={busy} onClick={saveMeeting}>{busy ? '사진 올리는 중…' : '내용 저장'}</button>
+                    <button style={btnAc} disabled={busy} onClick={saveMeeting}>{busy ? '올리는 중…' : '내용 저장'}</button>
                     {isAdmin && <button style={{ ...btn, color: C.no }} onClick={removeMeeting}>회의록 삭제</button>}
                   </div>
                   <div style={{ marginTop: 14, fontSize: 13, fontWeight: 800 }}>📋 이 회의의 액션아이템</div>
@@ -632,12 +682,7 @@ function TeamCalendar({ users, currentUser, isAdmin }) {
     const who = isAdmin ? (users.find(u => u.id === form.owner_id) || currentUser) : currentUser;
     if (form.end_date && form.end_date < selDay) { alert('종료일이 시작일보다 빠릅니다.'); return; }
     setUploading(true);
-    const atts = [];
-    for (const f of files) {
-      const blob = await compressImage(f);
-      const up = await uploadAttachment(blob, f.name);
-      if (up) atts.push(up); else alert(`사진 업로드 실패: ${f.name}`);
-    }
+    const atts = await uploadFiles(files);   // 사진·엑셀·PDF 모두 (2026-07-27)
     const t = etypeOf(form.etype);
     const r = await addCalEvent({
       event_date: selDay, end_date: form.end_date || null, etype: form.etype,
@@ -761,12 +806,10 @@ function TeamCalendar({ users, currentUser, isAdmin }) {
             </div>
             <textarea style={{ ...ta, minHeight: 44 }} placeholder="메모 (예: 병원 진료 / ○○ 미팅)" value={form.memo} onChange={e => setForm(f => ({ ...f, memo: e.target.value }))} />
             <div style={{ marginTop: 8 }}>
-              <div style={label}>📷 사진 첨부 (영수증·증빙 — 자동으로 용량을 줄여 저장합니다)</div>
-              <input type="file" accept="image/*" multiple style={{ fontSize: 13, color: C.txd }} onChange={e => setFiles(Array.from(e.target.files || []))} />
-              {files.length > 0 && <span style={{ fontSize: 12, color: C.ok, marginLeft: 8 }}>{files.length}장 선택됨</span>}
+              <PhotoInput files={files} setFiles={setFiles} />
             </div>
             <div style={{ marginTop: 10 }}>
-              <button style={btnAc} disabled={uploading} onClick={saveEvent}>{uploading ? '사진 올리는 중…' : '등록하기'}</button>
+              <button style={btnAc} disabled={uploading} onClick={saveEvent}>{uploading ? '올리는 중…' : '등록하기'}</button>
             </div>
           </div>
         )}
