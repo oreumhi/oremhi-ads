@@ -61,6 +61,13 @@ export default function Overview({ data, allowedBrands, changeRange, changeCusto
   useEffect(() => { fetchBrandTargets().then(setTargets); }, []);
   const targetBy = useMemo(() => { const m = {}; targets.forEach(t => { m[t.brand] = t; }); return m; }, [targets]);
 
+  // ※ 아래 화면 상태들은 반드시 이 자리(YOY 조회보다 위)에 있어야 합니다.
+  //   2026-07-28: custom을 선언보다 먼저 참조해 화면이 통째로 열리지 않던 문제를 고쳤습니다.
+  //   (useEffect의 의존성 목록은 화면을 그릴 때 바로 읽히기 때문에 선언이 뒤에 있으면 오류가 납니다)
+  const [view, setView] = useState('brand');      // 'brand' | 'media'
+  const [custom, setCustom] = useState(null);     // 직접 지정한 기간
+  const [showPicker, setShowPicker] = useState(false);
+
   // YOY 자동: 현재 보는 기간의 '작년 같은 기간'을 집계 테이블에서 조회 (작년 보고서 데이터 기반)
   const [lyByBrand, setLyByBrand] = useState({});
   const ymdL = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -80,9 +87,7 @@ export default function Overview({ data, allowedBrands, changeRange, changeCusto
       setLyByBrand(m);
     })();
   }, [range, custom]);
-  const [view, setView] = useState('brand'); // 'brand' | 'media'
-  const [custom, setCustom] = useState(null);
-  const [showPicker, setShowPicker] = useState(false);
+
   const adData = useMemo(
     () => custom ? adDataAll.filter(r => r.date >= custom.from && r.date <= custom.to) : adDataAll,
     [adDataAll, custom]);
