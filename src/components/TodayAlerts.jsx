@@ -22,8 +22,29 @@ const sumM = (rows) => rows.reduce((a, r) => ({
 }), { impressions: 0, clicks: 0, cost: 0, conversions: 0, revenue: 0 });
 const roasOf = (m) => m.cost > 0 ? m.revenue / m.cost * 100 : 0;
 
+// 목록이 길면 화면을 다 덮어버려서, 기본은 5건만 보여주고 나머지는 눌러서 펼칩니다.
+const PREVIEW = 5;
+
+function MoreButton({ total, shown, onToggle }) {
+  if (total <= PREVIEW) return null;
+  const opened = shown >= total;
+  return (
+    <button onClick={onToggle}
+      style={{
+        width: '100%', marginTop: 6, padding: '8px 0', cursor: 'pointer',
+        background: 'transparent', border: `1px dashed ${C.bd}`, borderRadius: 10,
+        color: C.txd, fontSize: 12, fontWeight: 700,
+      }}>
+      {opened ? '접기 ▲' : `전체 보기 (${total - PREVIEW}건 더) ▼`}
+    </button>
+  );
+}
+
 export default function TodayAlerts({ currentUser, allowedBrands }) {
   const isAdmin = currentUser?.role === 'admin';
+  const [moreAlerts, setMoreAlerts] = useState(false);   // 이상 신호 전체 보기
+  const [morePerf, setMorePerf] = useState(false);       // 성과 경고 전체 보기
+  const [morePromise, setMorePromise] = useState(false); // 오늘 약속 전체 보기
   const [adData, setAdData] = useState([]);
   const [promises, setPromises] = useState([]);
   const [perfAlerts, setPerfAlerts] = useState([]);
@@ -111,30 +132,34 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
           {promises.length > 0 && (
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: C.yel, marginBottom: 6 }}>📞 오늘 연락드리기로 한 약속 ({promises.length}건)</div>
-              {promises.map(p => (
+              {promises.slice(0, morePromise ? promises.length : PREVIEW).map(p => (
                 <div key={p.id} style={{ background: 'rgba(240,199,70,0.08)', border: '1px solid rgba(240,199,70,0.35)', borderRadius: 10, padding: '8px 12px', marginBottom: 6 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>[{p.brand}] {p.title}</div>
                   <div style={{ fontSize: 12, color: C.txd, marginTop: 2, whiteSpace: 'pre-wrap' }}>{(p.memo || '').split('\n').slice(-1)[0]}</div>
                 </div>
               ))}
+              <MoreButton total={promises.length} shown={morePromise ? promises.length : PREVIEW}
+                onToggle={() => setMorePromise(v => !v)} />
             </div>
           )}
           {perfAlerts.length > 0 && (
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: C.pink, marginBottom: 6 }}>📉 성과 경고 — 조치 필요 ({perfAlerts.length}건, 팀 업무→캘린더에서 조치 입력)</div>
-              {perfAlerts.map(p => (
+              {perfAlerts.slice(0, morePerf ? perfAlerts.length : PREVIEW).map(p => (
                 <div key={p.id} style={{ background: 'rgba(237,110,160,0.08)', border: '1px solid rgba(237,110,160,0.35)', borderRadius: 10, padding: '8px 12px', marginBottom: 6 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>{p.severity === 'alert' ? '🚨' : '⚠'} {p.title}</div>
                   <div style={{ fontSize: 12, color: C.txd, marginTop: 2 }}>{p.memo}</div>
                 </div>
               ))}
+              <MoreButton total={perfAlerts.length} shown={morePerf ? perfAlerts.length : PREVIEW}
+                onToggle={() => setMorePerf(v => !v)} />
             </div>
           )}
           {alerts.length === 0 ? (
             <div style={{ fontSize: 13, color: C.txd }}>최근 7일 기준 특별히 챙길 이상 신호가 없습니다. 좋은 흐름입니다. 👍</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {alerts.map((a, i) => (
+              {alerts.slice(0, moreAlerts ? alerts.length : PREVIEW).map((a, i) => (
                 <div key={i} style={{ display: 'flex', gap: 10, background: sevColor(a.sev) + '12', border: `1px solid ${sevColor(a.sev)}44`, borderRadius: 10, padding: '10px 12px' }}>
                   <div style={{ fontSize: 16, lineHeight: 1.2 }}>{a.sev === 'high' ? '🔴' : '🟡'}</div>
                   <div style={{ flex: 1 }}>
@@ -146,6 +171,8 @@ export default function TodayAlerts({ currentUser, allowedBrands }) {
                   </div>
                 </div>
               ))}
+              <MoreButton total={alerts.length} shown={moreAlerts ? alerts.length : PREVIEW}
+                onToggle={() => setMoreAlerts(v => !v)} />
             </div>
           )}
           <div style={{ fontSize: 11, color: C.txm, marginTop: 10 }}>최근 7일 vs 직전 7일 비교 기준 · 매일 수집 데이터 반영</div>
