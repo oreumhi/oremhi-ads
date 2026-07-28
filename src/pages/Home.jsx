@@ -250,7 +250,7 @@ const SEV = { high: { c: C.no, t: '긴급' }, mid: { c: C.warn, t: '주의' }, i
 
 function TodoList({ items, setTab }) {
   const [showAll, setShowAll] = useState(false);
-  const list = showAll ? items : items.slice(0, 8);
+  const list = showAll ? items : items.slice(0, 5);   // 기본 5건만 (2026-07-28 대표님 지시)
   return (
     <div style={card}>
       {secTitle('🚨', '오늘 챙길 것', items.length > 0 && <span style={{ fontSize: 10.5, color: C.no, background: '#f0707022', border: '1px solid #f0707044', borderRadius: 10, padding: '1px 8px', fontWeight: 700 }}>{items.length}건</span>)}
@@ -272,9 +272,9 @@ function TodoList({ items, setTab }) {
               {it.tab && <span style={{ fontSize: 11, color: C.ac, flexShrink: 0 }}>보기 →</span>}
             </div>
           ))}
-          {items.length > 8 && (
+          {items.length > 5 && (
             <button onClick={() => setShowAll(s => !s)} style={{ background: 'none', border: `1px dashed ${C.bd}`, borderRadius: 8, padding: '6px', color: C.txd, fontSize: 11.5, cursor: 'pointer' }}>
-              {showAll ? '접기 ▲' : `${items.length - 8}건 더 보기 ▼`}
+              {showAll ? '접기 ▲' : `전체 보기 (${items.length - 5}건 더) ▼`}
             </button>
           )}
         </div>
