@@ -25,6 +25,7 @@ export const TABS = [
   { id: 'rank',      label: '순위 체크', icon: '🏆' },
   { id: 'report',    label: '광고주 리포트', icon: '📄' },
   { id: 'diagnosis', label: '하락 진단', icon: '🔎' },
+  { id: 'aiq',       label: 'AI 질문', icon: '🙋' },
   { id: 'scaleup',   label: '스케일업 발굴', icon: '📈' },
   { id: 'proposals', label: '제안 도우미', icon: '💡' },
   { id: 'panal',     label: '상품 분석', icon: '🔍' },
