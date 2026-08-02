@@ -30,6 +30,7 @@ import Report from './pages/Report';
 import Diagnosis from './pages/Diagnosis';
 import Scaleup from './pages/Scaleup';
 import Proposals from './pages/Proposals';
+import Questions from './pages/Questions';
 import Team from './pages/Team';
 import ProductAnalysis from './pages/ProductAnalysis';
 import Settings from './pages/Settings';
@@ -325,6 +326,7 @@ export default function App() {
       {tab === 'rank' && <RankCheck currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'report' && <Report currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'proposals' && <Proposals currentUser={currentUser} allowedBrands={allowedBrands} />}
+      {tab === 'aiq' && <Questions currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'diagnosis' && <Diagnosis currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'scaleup' && <Scaleup allowedBrands={allowedBrands} />}
       {tab === 'team' && <Team currentUser={currentUser} />}
