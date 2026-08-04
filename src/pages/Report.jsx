@@ -903,9 +903,9 @@ export default function Report({ currentUser, allowedBrands }) {
           </Section>
 
           {/* 키워드 인사이트 (검색광고만) */}
-          {channel === 'search' && (
-            <Section title="키워드 인사이트" className={kwAgg.length === 0 ? 'no-print' : ''} sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
-              {kwAgg.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 키워드 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+          {channel === 'search' && kwAgg.length > 0 && (
+            <Section title="키워드 인사이트" sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
+              {(
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: R.ok, marginBottom: 6 }}>🟢 성과 우수 키워드 (매출 기준 TOP 10)</div>
@@ -922,9 +922,9 @@ export default function Report({ currentUser, allowedBrands }) {
           )}
 
           {/* 매체별 (검색광고만) */}
-          {channel === 'search' && (
-            <Section title="매체별 성과 (PC / 모바일)" className={deviceRows.length === 0 ? 'no-print' : ''}>
-              {deviceRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 매체별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+          {channel === 'search' && deviceRows.length > 0 && (
+            <Section title="매체별 성과 (PC / 모바일)">
+              {(
               <div>
               <div style={{ marginBottom: 12 }}><ChartBlock items={deviceRows.map(d => ({ label: d.device, spend: d.m.cost, revenue: d.m.revenue, roas: roasOf(d.m) }))} /></div>
               <MetricTable head={['매체', ...STD_HEAD, '비중']}
@@ -935,18 +935,18 @@ export default function Report({ currentUser, allowedBrands }) {
           )}
 
           {/* 시간대별 (검색광고만) */}
-          {channel === 'search' && (
-            <Section title="시간대별 성과" className={hasHour ? '' : 'no-print'} sub={hasHour ? `전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)` : ''}>
-              {!hasHour ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 시간대별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+          {channel === 'search' && hasHour && (
+            <Section title="시간대별 성과" sub={`전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)`}>
+              {(
               <ChartBlock items={hourAgg.map(h => ({ label: h.hour_num + '시', spend: h.cost, revenue: h.revenue }))} />
               )}
             </Section>
           )}
 
           {/* 성별 (검색광고만) */}
-          {channel === 'search' && (
-            <Section title="성별 성과" className={genderRows.length === 0 ? 'no-print' : ''} sub="어떤 성별에서 전환이 잘 나오는지 — 타겟 조정·소재 방향의 근거가 됩니다.">
-              {genderRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 성별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+          {channel === 'search' && genderRows.length > 0 && (
+            <Section title="성별 성과" sub="어떤 성별에서 전환이 잘 나오는지 — 타겟 조정·소재 방향의 근거가 됩니다.">
+              {(
               <div>
                 <div style={{ marginBottom: 12 }}><ChartBlock items={genderRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
                 <MetricTable head={['성별', ...STD_HEAD, '비중']} rows={demoTableRows(genderRows)} />
@@ -956,9 +956,9 @@ export default function Report({ currentUser, allowedBrands }) {
           )}
 
           {/* 연령대 (검색광고만) */}
-          {channel === 'search' && (
-            <Section title="연령대 성과" className={ageRows.length === 0 ? 'no-print' : ''} sub="연령대별 반응 — 예산을 어느 연령에 집중할지 판단하는 기준입니다.">
-              {ageRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 연령대 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+          {channel === 'search' && ageRows.length > 0 && (
+            <Section title="연령대 성과" sub="연령대별 반응 — 예산을 어느 연령에 집중할지 판단하는 기준입니다.">
+              {(
               <div>
                 <div style={{ marginBottom: 12 }}><ChartBlock items={ageRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
                 <MetricTable head={['연령대', ...STD_HEAD, '비중']} rows={demoTableRows(ageRows)} />
@@ -968,9 +968,9 @@ export default function Report({ currentUser, allowedBrands }) {
           )}
 
           {/* 지역 (검색광고만) */}
-          {channel === 'search' && (
-            <Section title="지역별 성과 (상위 12)" className={regionRows.length === 0 ? 'no-print' : ''} sub="지역별 성과 — 지역 타겟팅·매장 연계 프로모션에 참고하세요.">
-              {regionRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 지역 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
+          {channel === 'search' && regionRows.length > 0 && (
+            <Section title="지역별 성과 (상위 12)" sub="지역별 성과 — 지역 타겟팅·매장 연계 프로모션에 참고하세요.">
+              {(
               <div>
                 <div style={{ marginBottom: 12 }}><ChartBlock items={regionRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
                 <MetricTable head={['지역', ...STD_HEAD, '비중']} rows={demoTableRows(regionRows)} />
