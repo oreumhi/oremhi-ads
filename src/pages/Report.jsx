@@ -203,10 +203,14 @@ function MetricTable({ head, rows }) {
 }
 
 function Section({ title, sub, children, className }) {
+  // 제목+부제를 한 덩어리(rpt-head)로 묶어, 인쇄 시 바로 다음 내용과 반드시 함께 넘어가게 한다.
+  // (2026-08-04: 제목만 앞 페이지에 남고 표가 다음 장으로 가는 문제)
   return (
     <div className={className || ''} style={{ marginTop: 22 }}>
-      <div className="rpt-title" style={{ fontSize: 14, fontWeight: 800, marginBottom: sub ? 2 : 8 }}>{title}</div>
-      {sub && <div className="rpt-title" style={{ fontSize: 11.5, color: R.sub, marginBottom: 8 }}>{sub}</div>}
+      <div className="rpt-head">
+        <div style={{ fontSize: 14, fontWeight: 800, marginBottom: sub ? 2 : 8 }}>{title}</div>
+        {sub && <div style={{ fontSize: 11.5, color: R.sub, marginBottom: 8 }}>{sub}</div>}
+      </div>
       {children}
     </div>
   );
@@ -708,6 +712,10 @@ export default function Report({ currentUser, allowedBrands }) {
            - 차트·카드·작은 표: 통째로 다음 페이지로
            - 페이지보다 긴 표: 행 단위로만 나뉘고, 다음 페이지에 머리글 반복 */
         .rpt-avoid{break-inside:avoid !important;page-break-inside:avoid !important;}
+        /* 제목 덩어리: 스스로 쪼개지지 않고, 뒤 내용과 붙어서 넘어감 */
+        .rpt-head{break-inside:avoid !important;page-break-inside:avoid !important;
+                  break-after:avoid !important;page-break-after:avoid !important;}
+        .rpt-head + *{break-before:avoid !important;page-break-before:avoid !important;}
         .rpt-title{break-after:avoid !important;page-break-after:avoid !important;}
         .rpt-tbl table tr{break-inside:avoid !important;page-break-inside:avoid !important;}
         .rpt-tbl table thead{display:table-header-group;}
