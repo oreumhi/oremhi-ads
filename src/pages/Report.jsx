@@ -514,18 +514,6 @@ export default function Report({ currentUser, allowedBrands }) {
     if (byWeekday.length) sheets.push(['요일별', [['요일', ...XHEAD], ...byWeekday.map(w => [w.label, ...xr(w.m)]), ['전체', ...xr(cur)]]]);
     if (byType.length) sheets.push(['광고유형별', [['광고유형', ...XHEAD], ...byType.map(t => [t.type, ...xr(t.m)]), ['전체', ...xr(cur)]]]);
     if (topAds.length) sheets.push(['상위광고', [['광고', '유형', ...XHEAD], ...topAds.map(a => [a.label, a.type, ...xr(a.m)])]]);
-    if (channel === 'search') {
-      if (topKw.length || wasteKw.length) sheets.push(['키워드', [
-        ['[성과 우수 키워드 TOP 10]'], ['키워드', ...XHEAD], ...topKw.map(k => [k.keyword, ...xr(k.m)]),
-        [], ['[낭비 의심 키워드 (비용 발생·전환 0)]'], ['키워드', ...XHEAD], ...wasteKw.map(k => [k.keyword, ...xr(k.m)]),
-      ]]);
-      if (deviceRows.length) sheets.push(['매체별', [['매체', ...XHEAD], ...deviceRows.map(d => [d.device, ...xr(d.m)])]]);
-      if (hasHour) sheets.push(['시간대별', [['시간', '광고비(원)', '노출수', '클릭수', '전환수', '매출(원)'],
-        ...hourAgg.map(h => [h.hour_num + '시', Math.round(h.cost), h.impressions, h.clicks, h.conversions, Math.round(h.revenue)])]]);
-      if (genderRows.length) sheets.push(['성별', [['성별', ...XHEAD], ...genderRows.map(d => [d.label, ...xr(d.m)])]]);
-      if (ageRows.length) sheets.push(['연령대', [['연령대', ...XHEAD], ...ageRows.map(d => [d.label, ...xr(d.m)])]]);
-      if (regionRows.length) sheets.push(['지역별', [['지역', ...XHEAD], ...regionRows.map(d => [d.label, ...xr(d.m)])]]);
-    }
     if (wasteAds.length) sheets.push(['낭비의심광고', [['광고', '유형', ...XHEAD], ...wasteAds.map(a => [a.label, a.type, ...xr(a.m)])]]);
     return sheets;
   };
@@ -638,17 +626,6 @@ export default function Report({ currentUser, allowedBrands }) {
     if (byWeekday.length) xAddTable(wb, '요일별', ['요일', ...XHEAD], [...byWeekday.map(w => [w.label, ...xr(w.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
     if (byType.length) xAddTable(wb, '광고유형별', ['광고유형', ...XHEAD], [...byType.map(t2 => [t2.type, ...xr(t2.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
     if (topAds.length) xAddTable(wb, '상위광고', ['광고', '유형', ...XHEAD], topAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '매출 기준 상위' });
-    if (channel === 'search') {
-      if (topKw.length) xAddTable(wb, '키워드 TOP10', ['키워드', ...XHEAD], topKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '매출 기준' });
-      if (wasteKw.length) xAddTable(wb, '낭비 키워드', ['키워드', ...XHEAD], wasteKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '비용 발생·전환 0 — 점검·제외 대상' });
-      if (deviceRows.length) xAddTable(wb, '매체별', ['매체', ...XHEAD], deviceRows.map(d => [d.device, ...xr(d.m)]), XMETA);
-      if (hasHour) xAddTable(wb, '시간대별', ['시간', '광고비', '노출수', '클릭수', '전환수', '매출'],
-        hourAgg.map(h => [h.hour_num + '시', Math.round(h.cost), h.impressions, h.clicks, h.conversions, Math.round(h.revenue)]),
-        [{ fmt: '"₩"#,##0', color: XC.warn, bold: true }, { fmt: '#,##0' }, { fmt: '#,##0' }, { fmt: '#,##0', color: XC.ok, bold: true }, { fmt: '"₩"#,##0', color: XC.pink }]);
-      if (genderRows.length) xAddTable(wb, '성별', ['성별', ...XHEAD], genderRows.map(d => [d.label, ...xr(d.m)]), XMETA);
-      if (ageRows.length) xAddTable(wb, '연령대', ['연령대', ...XHEAD], ageRows.map(d => [d.label, ...xr(d.m)]), XMETA);
-      if (regionRows.length) xAddTable(wb, '지역별', ['지역', ...XHEAD], regionRows.map(d => [d.label, ...xr(d.m)]), XMETA, { sub: '상위 12' });
-    }
     if (wasteAds.length) xAddTable(wb, '낭비의심광고', ['광고', '유형', ...XHEAD], wasteAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '비용 발생·전환 0' });
     return wb;
   };
@@ -902,82 +879,11 @@ export default function Report({ currentUser, allowedBrands }) {
               rows={topAds.map(a => ({ label: a.label, cells: [{ v: a.type, color: R.sub }, ...stdCells(a.m)] }))} />}
           </Section>
 
-          {/* 키워드 인사이트 (검색광고만) */}
-          {channel === 'search' && kwAgg.length > 0 && (
-            <Section title="키워드 인사이트" sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
-              {(
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.ok, marginBottom: 6 }}>🟢 성과 우수 키워드 (매출 기준 TOP 10)</div>
-                  <MetricTable head={['키워드', ...STD_HEAD]} rows={topKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.no, marginBottom: 6 }}>🔴 낭비 의심 키워드 (비용 발생·전환 0)</div>
-                  {wasteKw.length ? <MetricTable head={['키워드', ...STD_HEAD]} rows={wasteKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
-                    : <div style={{ fontSize: 12.5, color: R.sub, padding: 10 }}>비용만 나가고 전환 없는 키워드가 없습니다. 👍</div>}
-                </div>
-              </div>
-              )}
-            </Section>
-          )}
 
-          {/* 매체별 (검색광고만) */}
-          {channel === 'search' && deviceRows.length > 0 && (
-            <Section title="매체별 성과 (PC / 모바일)">
-              {(
-              <div>
-              <div style={{ marginBottom: 12 }}><ChartBlock items={deviceRows.map(d => ({ label: d.device, spend: d.m.cost, revenue: d.m.revenue, roas: roasOf(d.m) }))} /></div>
-              <MetricTable head={['매체', ...STD_HEAD, '비중']}
-                rows={[...deviceRows.map(d => ({ label: d.device, cells: [...stdCells(d.m), { v: (devTotalCost > 0 ? d.m.cost / devTotalCost * 100 : 0).toFixed(0) + '%', color: R.sub }] })), { label: '전체', hl: true, bold: true, cells: [...stdCells(sumD(deviceRows.map(d => d.m))), { v: '100%', color: R.sub }] }]} />
-              </div>
-              )}
-            </Section>
-          )}
 
-          {/* 시간대별 (검색광고만) */}
-          {channel === 'search' && hasHour && (
-            <Section title="시간대별 성과" sub={`전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)`}>
-              {(
-              <ChartBlock items={hourAgg.map(h => ({ label: h.hour_num + '시', spend: h.cost, revenue: h.revenue }))} />
-              )}
-            </Section>
-          )}
 
-          {/* 성별 (검색광고만) */}
-          {channel === 'search' && genderRows.length > 0 && (
-            <Section title="성별 성과" sub="어떤 성별에서 전환이 잘 나오는지 — 타겟 조정·소재 방향의 근거가 됩니다.">
-              {(
-              <div>
-                <div style={{ marginBottom: 12 }}><ChartBlock items={genderRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
-                <MetricTable head={['성별', ...STD_HEAD, '비중']} rows={demoTableRows(genderRows)} />
-              </div>
-              )}
-            </Section>
-          )}
 
-          {/* 연령대 (검색광고만) */}
-          {channel === 'search' && ageRows.length > 0 && (
-            <Section title="연령대 성과" sub="연령대별 반응 — 예산을 어느 연령에 집중할지 판단하는 기준입니다.">
-              {(
-              <div>
-                <div style={{ marginBottom: 12 }}><ChartBlock items={ageRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
-                <MetricTable head={['연령대', ...STD_HEAD, '비중']} rows={demoTableRows(ageRows)} />
-              </div>
-              )}
-            </Section>
-          )}
 
-          {/* 지역 (검색광고만) */}
-          {channel === 'search' && regionRows.length > 0 && (
-            <Section title="지역별 성과 (상위 12)" sub="지역별 성과 — 지역 타겟팅·매장 연계 프로모션에 참고하세요.">
-              {(
-              <div>
-                <div style={{ marginBottom: 12 }}><ChartBlock items={regionRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
-                <MetricTable head={['지역', ...STD_HEAD, '비중']} rows={demoTableRows(regionRows)} />
-              </div>
-              )}
-            </Section>
-          )}
 
           {/* 낭비 의심 광고 */}
           {!detailLoading && wasteAds.length > 0 && (
