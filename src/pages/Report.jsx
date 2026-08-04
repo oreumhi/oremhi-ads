@@ -179,8 +179,9 @@ const tdBase = { padding: '9px 10px', borderBottom: `1px solid ${R.line}`, fontS
 
 function MetricTable({ head, rows }) {
   // rows: [{ label, cells:[{v, color, bold}] , head }]
+  // 짧은 표는 통째로 다음 페이지로, 긴 표(15행↑)는 행 단위로만 나뉘게 (통째로 밀면 큰 공백이 생김)
   return (
-    <div className="rpt-tbl rpt-avoid" style={{ overflowX: 'auto' }}>
+    <div className={'rpt-tbl' + (rows.length <= 14 ? ' rpt-avoid' : '')} style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 620 }}>
         <thead><tr style={{ background: R.soft }}>
           {head.map((h, i) => <th key={i} style={{ ...tdBase, textAlign: i === 0 ? 'left' : 'right', color: R.sub, fontSize: 11, borderBottom: `1px solid ${R.line}` }}>{h}</th>)}
