@@ -22,9 +22,15 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.tx, fontFamily: "'Noto Sans KR',-apple-system,sans-serif", fontSize: 14 }}>
+      {/* 인쇄(PDF) 시 사이드바·상단바를 숨기고 본문을 종이 전체 폭으로.
+          — 광고주 리포트 PDF에 메뉴가 같이 찍히는 문제 수정 (2026-08-04 대표님 지시) */}
+      <style>{`@media print {
+        .app-sidebar, .app-topbar { display: none !important; }
+        .app-main { margin-left: 0 !important; padding: 0 !important; }
+      }`}</style>
       {/* 모바일 상단바 */}
       {mobile && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 50, background: C.sf, borderBottom: `1px solid ${C.bd}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', zIndex: 20 }}>
+        <div className="app-topbar" style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 50, background: C.sf, borderBottom: `1px solid ${C.bd}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', zIndex: 20 }}>
           <button onClick={() => setMenu(!menuOpen)} style={{ background: 'none', border: 'none', color: C.tx, fontSize: 20, cursor: 'pointer' }}>{menuOpen ? '✕' : '☰'}</button>
           <img src="/logo.png" alt="오름히 운영시스템" onClick={() => go('home')} style={{ height: 22, display: 'block', cursor: 'pointer' }} />
           <div style={{ width: 28 }} />
@@ -35,7 +41,7 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
       {mobile && menuOpen && <div onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 25 }} />}
 
       {/* 사이드바 */}
-      <div style={{ width: 200, background: C.sf, borderRight: `1px solid ${C.bd}`, position: 'fixed', top: 0, left: mobile ? (menuOpen ? 0 : -200) : 0, bottom: 0, display: 'flex', flexDirection: 'column', zIndex: 30, transition: mobile ? 'left 0.25s' : 'none' }}>
+      <div className="app-sidebar" style={{ width: 200, background: C.sf, borderRight: `1px solid ${C.bd}`, position: 'fixed', top: 0, left: mobile ? (menuOpen ? 0 : -200) : 0, bottom: 0, display: 'flex', flexDirection: 'column', zIndex: 30, transition: mobile ? 'left 0.25s' : 'none' }}>
         <div onClick={() => go('home')} title="홈으로" style={{ padding: '18px 14px 12px', borderBottom: `1px solid ${C.bd}`, cursor: 'pointer' }}>
           <img src="/logo.png" alt="오름히" style={{ height: 30, display: 'block' }} />
           <div style={{ fontSize: 10, color: C.txd, marginTop: 6 }}>오름히 운영시스템</div>
@@ -77,7 +83,7 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
       </div>
 
       {/* 메인 */}
-      <div style={{ marginLeft: mobile ? 0 : 200, padding: mobile ? '64px 14px 20px' : '20px 24px', minHeight: '100vh' }}>
+      <div className="app-main" style={{ marginLeft: mobile ? 0 : 200, padding: mobile ? '64px 14px 20px' : '20px 24px', minHeight: '100vh' }}>
         {children}
       </div>
     </div>
