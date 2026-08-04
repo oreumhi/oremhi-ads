@@ -151,7 +151,7 @@ function LineChart({ items }) {
 function ChartBlock({ items }) {
   if (!items.length) return null;
   return (
-    <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}>
+    <div className="rpt-avoid" style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: 14 }}>
       <div style={{ fontSize: 11, color: R.sub, marginBottom: 4 }}>
         <span style={{ color: R.warn, fontWeight: 800 }}>—</span> 광고비 &nbsp;&nbsp; <span style={{ color: R.pink, fontWeight: 800 }}>—</span> 매출액 &nbsp;<span style={{ color: '#9aa3b2' }}>(각 지표별 축 기준 · 추이 비교)</span>
       </div>
@@ -180,7 +180,7 @@ const tdBase = { padding: '9px 10px', borderBottom: `1px solid ${R.line}`, fontS
 function MetricTable({ head, rows }) {
   // rows: [{ label, cells:[{v, color, bold}] , head }]
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div className="rpt-tbl rpt-avoid" style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 620 }}>
         <thead><tr style={{ background: R.soft }}>
           {head.map((h, i) => <th key={i} style={{ ...tdBase, textAlign: i === 0 ? 'left' : 'right', color: R.sub, fontSize: 11, borderBottom: `1px solid ${R.line}` }}>{h}</th>)}
@@ -201,8 +201,8 @@ function MetricTable({ head, rows }) {
 function Section({ title, sub, children }) {
   return (
     <div style={{ marginTop: 22 }}>
-      <div style={{ fontSize: 14, fontWeight: 800, marginBottom: sub ? 2 : 8 }}>{title}</div>
-      {sub && <div style={{ fontSize: 11.5, color: R.sub, marginBottom: 8 }}>{sub}</div>}
+      <div className="rpt-title" style={{ fontSize: 14, fontWeight: 800, marginBottom: sub ? 2 : 8 }}>{title}</div>
+      {sub && <div className="rpt-title" style={{ fontSize: 11.5, color: R.sub, marginBottom: 8 }}>{sub}</div>}
       {children}
     </div>
   );
@@ -674,7 +674,18 @@ export default function Report({ currentUser, allowedBrands }) {
 
   return (
     <div>
-      <style>{`@media print { .no-print{display:none !important;} body{background:#fff !important;} .report-sheet{box-shadow:none !important;margin:0 !important;} }`}</style>
+      <style>{`@media print {
+        .no-print{display:none !important;}
+        body{background:#fff !important;}
+        .report-sheet{box-shadow:none !important;margin:0 !important;max-width:100% !important;border-radius:0 !important;}
+        /* 페이지 경계에서 잘리지 않게 (2026-08-04 대표님 지시)
+           - 차트·카드·작은 표: 통째로 다음 페이지로
+           - 페이지보다 긴 표: 행 단위로만 나뉘고, 다음 페이지에 머리글 반복 */
+        .rpt-avoid{break-inside:avoid !important;page-break-inside:avoid !important;}
+        .rpt-title{break-after:avoid !important;page-break-after:avoid !important;}
+        .rpt-tbl table tr{break-inside:avoid !important;page-break-inside:avoid !important;}
+        .rpt-tbl table thead{display:table-header-group;}
+      }`}</style>
 
       <div className="no-print" style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>광고주 리포트</div>
@@ -734,11 +745,11 @@ export default function Report({ currentUser, allowedBrands }) {
         </div>
 
         <div style={{ padding: '24px 30px' }}>
-          <div style={{ background: '#eef3ff', border: `1px solid #d6e0ff`, borderRadius: 10, padding: '10px 14px', fontSize: 12.5, color: R.ac, fontWeight: 600, marginBottom: 18 }}>
+          <div className="rpt-avoid" style={{ background: '#eef3ff', border: `1px solid #d6e0ff`, borderRadius: 10, padding: '10px 14px', fontSize: 12.5, color: R.ac, fontWeight: 600, marginBottom: 18 }}>
             ℹ️ 본 리포트의 모든 전환·매출·ROAS 지표는 <b>‘구매완료’ 기준</b>입니다. (장바구니 담기 등은 제외)
           </div>
           {/* 핵심 지표 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+          <div className="rpt-avoid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
             <Kpi label="광고비" value={won(cur.cost)} cur={cur.cost} prev={prev.cost} />
             <Kpi label="구매완료 전환매출액" value={won(cur.revenue)} cur={cur.revenue} prev={prev.revenue} />
             <Kpi label="구매완료 ROAS" value={roasStr(roasOf(cur))} cur={roasOf(cur)} prev={roasOf(prev)} />
@@ -783,7 +794,7 @@ export default function Report({ currentUser, allowedBrands }) {
             }
             if (!cells.length) return null;
             return (
-              <div style={{ marginTop: 14, background: '#f7f5ff', border: '1px solid #e4defc', borderRadius: 12, padding: '14px 18px' }}>
+              <div className="rpt-avoid" style={{ marginTop: 14, background: '#f7f5ff', border: '1px solid #e4defc', borderRadius: 12, padding: '14px 18px' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 800, color: R.pur, marginBottom: 10 }}>🎯 목표 · 작년 동기(YOY) 비교</div>
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(140px, 1fr))`, gap: 12 }}>
                   {cells.map(c => (
@@ -799,7 +810,7 @@ export default function Report({ currentUser, allowedBrands }) {
           })()}
 
           {/* 총평 */}
-          <div style={{ marginTop: 20, background: R.soft, border: `1px solid ${R.line}`, borderRadius: 12, padding: '16px 18px' }}>
+          <div className="rpt-avoid" style={{ marginTop: 20, background: R.soft, border: `1px solid ${R.line}`, borderRadius: 12, padding: '16px 18px' }}>
             <div style={{ fontSize: 13, fontWeight: 800, color: R.ac, marginBottom: 6 }}>📌 요약 총평</div>
             <div style={{ fontSize: 13.5, lineHeight: 1.7 }}>{summary}</div>
           </div>
@@ -932,13 +943,13 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 변경 이력 */}
           <Section title="이번 기간 변경 이력" sub="무엇을, 왜 바꿨는지 적어주세요 (예: OO 키워드 입찰 인상, XX 소재 교체). 인쇄 시 함께 나갑니다.">
-            <textarea value={changeLog} onChange={e => setChangeLog(e.target.value)} placeholder="예) 7/12 '남자팬티' 입찰 +10% / 7/14 리타겟 소재 2종 교체 / 7/15 효율 낮은 쇼핑 캠페인 예산 -20%"
+            <textarea className="rpt-avoid" value={changeLog} onChange={e => setChangeLog(e.target.value)} placeholder="예) 7/12 '남자팬티' 입찰 +10% / 7/14 리타겟 소재 2종 교체 / 7/15 효율 낮은 쇼핑 캠페인 예산 -20%"
               style={{ width: '100%', minHeight: 70, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </Section>
 
           {/* 코멘트 */}
           <Section title="담당자 코멘트 · 다음 제안">
-            <textarea value={comment} onChange={e => setComment(e.target.value)} placeholder="이번 기간 분석과 다음 기간 제안을 적어주세요 (인쇄 시 함께 나갑니다)"
+            <textarea className="rpt-avoid" value={comment} onChange={e => setComment(e.target.value)} placeholder="이번 기간 분석과 다음 기간 제안을 적어주세요 (인쇄 시 함께 나갑니다)"
               style={{ width: '100%', minHeight: 90, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </Section>
 
