@@ -254,7 +254,21 @@ export default function Report({ currentUser, allowedBrands }) {
   const P = isCustom ? { n: spanC, label: '지정 기간' } : PERIODS[ptype];
   const thisFrom = isCustom ? cFrom : addDays(refDate, -(P.n - 1));
   const thisTo = isCustom ? cTo : refDate;
-  const prevFrom = addDays(thisFrom, -P.n), prevTo = addDays(thisFrom, -1);
+
+  // 비교 기간도 직접 고를 수 있게 (2026-08-04 대표님 지시)
+  //   기본(auto)  : 이번 기간 바로 앞의 같은 길이 구간
+  //   직접(custom): 달력으로 고른 임의 구간 — 예) 3주 전 1주 vs 8주 전 1주
+  const [cmpCustom, setCmpCustom] = useState(false);
+  const [pFromIn, setPFromIn] = useState('');
+  const [pToIn, setPToIn] = useState('');
+  const autoPrevFrom = addDays(thisFrom, -P.n), autoPrevTo = addDays(thisFrom, -1);
+  const cmpOk = cmpCustom && pFromIn && pToIn;
+  const prevFrom = cmpOk ? (pFromIn <= pToIn ? pFromIn : pToIn) : autoPrevFrom;
+  const prevTo = cmpOk ? (pFromIn <= pToIn ? pToIn : pFromIn) : autoPrevTo;
+  const openCmp = () => {   // 비교 기간 지정을 켤 때, 현재 자동 비교 구간을 초기값으로
+    if (!cmpCustom) { setPFromIn(autoPrevFrom); setPToIn(autoPrevTo); }
+    setCmpCustom(!cmpCustom);
+  };
 
   // 지정 기간이 기본 로드(70일)보다 과거면 집계를 그만큼 더 불러온다
   useEffect(() => {
@@ -416,6 +430,84 @@ export default function Report({ currentUser, allowedBrands }) {
 
   const copyKakao = async () => { try { await navigator.clipboard.writeText(kakaoText); alert('카톡용 요약을 복사했습니다.'); } catch { alert('복사 실패'); } };
 
+  // ─── 엑셀 다운로드 (2026-08-04 대표님 지시) ───
+  //  XLSX 라이브러리는 버튼을 누를 때만 CDN에서 한 번 불러온다 (평소 화면 속도에 영향 없음).
+  //  CDN이 막힌 환경이면 엑셀에서 열리는 CSV로 자동 대체.
+  const loadXlsxLib = () => new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('XLSX 없음'));
+    s.onerror = () => reject(new Error('CDN 차단'));
+    document.head.appendChild(s);
+  });
+
+  // 지표 행(숫자 그대로 — 엑셀에서 재계산 가능하게)
+  const xr = (m) => [m.impressions, m.clicks, +ctrOf(m).toFixed(2), Math.round(cpcOf(m)), Math.round(m.cost),
+    m.conversions, +cvrOf(m).toFixed(1), Math.round(cpaOf(m)), Math.round(m.revenue), +roasOf(m).toFixed(0)];
+  const XHEAD = ['노출수', '클릭수', 'CTR(%)', 'CPC(원)', '광고비(원)', '구매완료 전환수', '전환율(%)', 'CPA(원)', '구매완료 매출(원)', 'ROAS(%)'];
+
+  const buildSheets = () => {
+    const sheets = [];
+    const info = [
+      ['오름히 광고 성과 리포트'],
+      ['브랜드', brand], ['채널', channel === 'gfa' ? '디스플레이(GFA)' : '검색광고'],
+      ['이번 기간', `${thisFrom} ~ ${thisTo}`], [cmpOk ? '비교기간(직접 지정)' : '전기간(자동)', `${prevFrom} ~ ${prevTo}`],
+      ['생성일', ymd(new Date())], [],
+      ['지표', '이번 기간', '비교기간', '증감', '증감률(%)'],
+      ...METRICS.map(mt => {
+        const cv = mt.get(cur), pv = mt.get(prev);
+        const r1 = ['ctr','cvr'].includes(mt.key) ? 2 : 0;
+        const rd = (x) => +(+x || 0).toFixed(r1);
+        return [mt.label, rd(cv), rd(pv), rd(cv - pv), +growth(cv, pv).toFixed(1)];
+      }),
+    ];
+    sheets.push(['요약', info]);
+    sheets.push(['일별', [['일자', ...XHEAD], ...daily.map(d => [d.date, ...xr({ ...d, revenue: d.revenue })]), ['합계', ...xr(cur)]]]);
+    if (byWeekday.length) sheets.push(['요일별', [['요일', ...XHEAD], ...byWeekday.map(w => [w.label, ...xr(w.m)]), ['전체', ...xr(cur)]]]);
+    if (byType.length) sheets.push(['광고유형별', [['광고유형', ...XHEAD], ...byType.map(t => [t.type, ...xr(t.m)]), ['전체', ...xr(cur)]]]);
+    if (topAds.length) sheets.push(['상위광고', [['광고', '유형', ...XHEAD], ...topAds.map(a => [a.label, a.type, ...xr(a.m)])]]);
+    if (channel === 'search') {
+      if (topKw.length || wasteKw.length) sheets.push(['키워드', [
+        ['[성과 우수 키워드 TOP 10]'], ['키워드', ...XHEAD], ...topKw.map(k => [k.keyword, ...xr(k.m)]),
+        [], ['[낭비 의심 키워드 (비용 발생·전환 0)]'], ['키워드', ...XHEAD], ...wasteKw.map(k => [k.keyword, ...xr(k.m)]),
+      ]]);
+      if (deviceRows.length) sheets.push(['매체별', [['매체', ...XHEAD], ...deviceRows.map(d => [d.device, ...xr(d.m)])]]);
+      if (hasHour) sheets.push(['시간대별', [['시간', '광고비(원)', '노출수', '클릭수', '전환수', '매출(원)'],
+        ...hourAgg.map(h => [h.hour_num + '시', Math.round(h.cost), h.impressions, h.clicks, h.conversions, Math.round(h.revenue)])]]);
+      if (genderRows.length) sheets.push(['성별', [['성별', ...XHEAD], ...genderRows.map(d => [d.label, ...xr(d.m)])]]);
+      if (ageRows.length) sheets.push(['연령대', [['연령대', ...XHEAD], ...ageRows.map(d => [d.label, ...xr(d.m)])]]);
+      if (regionRows.length) sheets.push(['지역별', [['지역', ...XHEAD], ...regionRows.map(d => [d.label, ...xr(d.m)])]]);
+    }
+    if (wasteAds.length) sheets.push(['낭비의심광고', [['광고', '유형', ...XHEAD], ...wasteAds.map(a => [a.label, a.type, ...xr(a.m)])]]);
+    return sheets;
+  };
+
+  const downloadExcel = async () => {
+    if (!brand || !thisRows.length) { alert('선택한 기간에 데이터가 없습니다.'); return; }
+    const fname = `리포트_${brand}_${thisFrom}_${thisTo}`;
+    const sheets = buildSheets();
+    try {
+      const X = await loadXlsxLib();
+      const wb = X.utils.book_new();
+      sheets.forEach(([name, aoa]) => {
+        const ws = X.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = (aoa.find(r => r.length > 2) || []).map((_, i) => ({ wch: i === 0 ? 22 : 13 }));
+        X.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+      });
+      X.writeFile(wb, fname + '.xlsx');
+    } catch {
+      // CDN이 막혔으면 CSV(BOM)로 대체 — 엑셀에서 바로 열립니다
+      const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const csv = sheets.map(([name, aoa]) => `[${name}]\n` + aoa.map(r => r.map(esc).join(',')).join('\n')).join('\n\n');
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = fname + '.csv';
+      a.click(); URL.revokeObjectURL(a.href);
+      alert('엑셀 라이브러리를 불러오지 못해 CSV로 저장했습니다. 엑셀에서 바로 열립니다.');
+    }
+  };
+
   const btn = { padding: '8px 14px', borderRadius: 8, border: '1px solid #2b3350', background: '#1a1e2c', color: '#cfd6e6', cursor: 'pointer', fontSize: 13 };
   const btnOn = { ...btn, background: '#3a6ff0', color: '#fff', border: 'none', fontWeight: 700 };
 
@@ -480,7 +572,17 @@ export default function Report({ currentUser, allowedBrands }) {
           ) : (
             <input type="date" value={refDate} max={ymd(new Date())} onChange={e => setRefDate(e.target.value)} style={btn} />
           )}
+          <button onClick={openCmp} style={cmpCustom ? btnOn : btn} title="비교(전기간) 구간을 달력으로 직접 고릅니다">🆚 비교 기간 지정</button>
+          {cmpCustom && (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ color: '#8890a6', fontSize: 12 }}>비교:</span>
+              <input type="date" value={pFromIn} max={ymd(new Date())} onChange={e => setPFromIn(e.target.value)} style={btn} />
+              <span style={{ color: '#8890a6', fontSize: 12 }}>→</span>
+              <input type="date" value={pToIn} max={ymd(new Date())} onChange={e => setPToIn(e.target.value)} style={btn} />
+            </div>
+          )}
           <div style={{ flex: 1 }} />
+          <button onClick={downloadExcel} style={btn}>📊 엑셀 다운로드</button>
           <button onClick={copyKakao} style={btn}>💬 카톡 요약 복사</button>
           <button onClick={() => window.print()} style={btnOn}>🖨️ 인쇄 / PDF</button>
         </div>
@@ -502,7 +604,7 @@ export default function Report({ currentUser, allowedBrands }) {
             </div>
             <div style={{ textAlign: 'right', fontSize: 13, opacity: 0.95 }}>
               <div style={{ fontWeight: 700 }}>{kdate(thisFrom)} ~ {kdate(thisTo)}</div>
-              <div style={{ opacity: 0.85, marginTop: 4 }}>전기간: {kdate(prevFrom)}~{kdate(prevTo)}</div>
+              <div style={{ opacity: 0.85, marginTop: 4 }}>{cmpOk ? '비교기간' : '전기간'}: {kdate(prevFrom)}~{kdate(prevTo)}</div>
               <div style={{ opacity: 0.7, marginTop: 8, fontSize: 11 }}>생성일 {kdate(ymd(new Date()))}</div>
             </div>
           </div>
@@ -580,8 +682,8 @@ export default function Report({ currentUser, allowedBrands }) {
           </div>
 
           {/* 기간 상세 비교 */}
-          <Section title="기간 상세 비교" sub={`이번 ${P.label}(${kdate(thisFrom)}~${kdate(thisTo)}) vs 전기간(${kdate(prevFrom)}~${kdate(prevTo)}) — 전 지표 · 증가(+)는 초록, 감소(−)는 빨강 · '↓좋음' 표시 지표는 낮을수록 좋습니다`}>
-            <MetricTable head={['지표', '이번 기간', '전기간', '증감', '증감률']} rows={cmpRows} />
+          <Section title="기간 상세 비교" sub={`이번 ${P.label}(${kdate(thisFrom)}~${kdate(thisTo)}) vs ${cmpOk ? '지정 비교기간' : '전기간'}(${kdate(prevFrom)}~${kdate(prevTo)}) — 전 지표 · 증가(+)는 초록, 감소(−)는 빨강 · '↓좋음' 표시 지표는 낮을수록 좋습니다`}>
+            <MetricTable head={['지표', '이번 기간', cmpOk ? '비교기간' : '전기간', '증감', '증감률']} rows={cmpRows} />
           </Section>
 
           {/* 일자별 추이 */}
