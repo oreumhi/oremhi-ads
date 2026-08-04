@@ -704,8 +704,14 @@ export default function Report({ currentUser, allowedBrands }) {
 
   return (
     <div>
-      <style>{`@media print {
+      <style>{`
+      .print-only{display:none;}
+      @media print {
         .no-print{display:none !important;}
+        /* 입력칸(textarea)은 인쇄 시 고정 높이라 긴 글이 잘린다 → 일반 텍스트로 대체 출력 */
+        .print-only{display:block !important;}
+        .print-text{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.7;color:#1b2536;
+                    border:1px solid #e6e9ef;border-radius:12px;padding:14px;orphans:2;widows:2;}
         body{background:#fff !important;}
         .report-sheet{box-shadow:none !important;margin:0 !important;max-width:100% !important;border-radius:0 !important;}
         /* 페이지 경계에서 잘리지 않게 (2026-08-04 대표님 지시)
@@ -906,8 +912,9 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 변경 이력 */}
           <Section title="이번 기간 변경 이력" className={changeLog.trim() ? '' : 'no-print'} sub="무엇을, 왜 바꿨는지 적어주세요 (예: OO 키워드 입찰 인상, XX 소재 교체). 인쇄 시 함께 나갑니다.">
-            <textarea className="rpt-avoid" value={changeLog} onChange={e => setChangeLog(e.target.value)} placeholder="예) 7/12 '남자팬티' 입찰 +10% / 7/14 리타겟 소재 2종 교체 / 7/15 효율 낮은 쇼핑 캠페인 예산 -20%"
+            <textarea className="no-print" value={changeLog} onChange={e => setChangeLog(e.target.value)} placeholder="예) 7/12 '남자팬티' 입찰 +10% / 7/14 리타겟 소재 2종 교체 / 7/15 효율 낮은 쇼핑 캠페인 예산 -20%"
               style={{ width: '100%', minHeight: 70, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+            {changeLog.trim() && <div className="print-only print-text">{changeLog}</div>}
           </Section>
 
           {/* 코멘트 — 기본 문구 자동 작성, 수정·삭제 가능 */}
@@ -919,8 +926,9 @@ export default function Report({ currentUser, allowedBrands }) {
                 style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${R.line}`, background: '#fff', color: R.no, cursor: 'pointer', fontSize: 11.5 }}>🗑 비우기 (인쇄에서 제외)</button>
               <span style={{ fontSize: 11, color: R.sub, alignSelf: 'center' }}>기본 문구는 데이터로 자동 작성됩니다 — 자유롭게 고쳐 쓰세요</span>
             </div>
-            <textarea className="rpt-avoid" value={comment} onChange={e => { setComment(e.target.value); setCommentEdited(true); }} placeholder="이번 기간 분석과 다음 기간 제안을 적어주세요 (인쇄 시 함께 나갑니다)"
+            <textarea className="no-print" value={comment} onChange={e => { setComment(e.target.value); setCommentEdited(true); }} placeholder="이번 기간 분석과 다음 기간 제안을 적어주세요 (인쇄 시 함께 나갑니다)"
               style={{ width: '100%', minHeight: 90, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+            {comment.trim() && <div className="print-only print-text">{comment}</div>}
           </Section>
 
           <div style={{ marginTop: 24, paddingTop: 16, borderTop: `1px solid ${R.line}`, display: 'flex', justifyContent: 'space-between', fontSize: 11, color: R.sub }}>
