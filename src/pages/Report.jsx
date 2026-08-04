@@ -160,17 +160,20 @@ function ChartBlock({ items }) {
   );
 }
 
-function Delta({ g, invert }) {
+function Delta({ g, invert, neutral }) {
+  // 색 규칙(2026-08-04 대표님 지시): 지표가 '좋아지면' 초록, '나빠지면' 빨강.
+  //   CPC·CPA처럼 낮을수록 좋은 지표는 반대로(invert). 광고비는 좋고 나쁨이 없는 중립(회색).
   const up = g >= 0, good = invert ? !up : up;
   if (Math.abs(g) < 0.05) return <span style={{ fontSize: 12, color: R.sub }}>― 변동없음</span>;
-  return <span style={{ fontSize: 12, fontWeight: 700, color: good ? R.ok : R.no }}>{up ? '▲' : '▼'} {Math.abs(g).toFixed(1)}%</span>;
+  const color = neutral ? R.sub : good ? R.ok : R.no;
+  return <span style={{ fontSize: 12, fontWeight: 700, color }}>{up ? '▲' : '▼'} {Math.abs(g).toFixed(1)}%</span>;
 }
-function Kpi({ label, value, cur, prev, invert }) {
+function Kpi({ label, value, cur, prev, invert, neutral }) {
   return (
     <div style={{ border: `1px solid ${R.line}`, borderRadius: 12, padding: '14px 16px', background: '#fff' }}>
       <div style={{ fontSize: 12, color: R.sub, marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: R.ink, letterSpacing: '-0.5px' }}>{value}</div>
-      <div style={{ marginTop: 4 }}><Delta g={growth(cur, prev)} invert={invert} /> <span style={{ fontSize: 11, color: R.sub }}>전기간 대비</span></div>
+      <div style={{ marginTop: 4 }}><Delta g={growth(cur, prev)} invert={invert} neutral={neutral} /> <span style={{ fontSize: 11, color: R.sub }}>전기간 대비</span></div>
     </div>
   );
 }
@@ -199,9 +202,9 @@ function MetricTable({ head, rows }) {
   );
 }
 
-function Section({ title, sub, children }) {
+function Section({ title, sub, children, className }) {
   return (
-    <div style={{ marginTop: 22 }}>
+    <div className={className || ''} style={{ marginTop: 22 }}>
       <div className="rpt-title" style={{ fontSize: 14, fontWeight: 800, marginBottom: sub ? 2 : 8 }}>{title}</div>
       {sub && <div className="rpt-title" style={{ fontSize: 11.5, color: R.sub, marginBottom: 8 }}>{sub}</div>}
       {children}
@@ -351,26 +354,50 @@ export default function Report({ currentUser, allowedBrands }) {
       .sort((a, b) => b.m.cost - a.m.cost).slice(0, 6);
   }, [detailThis]);
 
+  // ─── 계정 ↔ 브랜드 연결 ───
+  //  ※ 2026-08-04 수정: 예전에는 계정명에서 접미사를 뗀 것이 브랜드명과 같다고 가정했는데,
+  //    모비블루(계정 hkvape)·리빙코리아(kwkw5265)처럼 이름이 다르면 키워드·매체·성별 등이
+  //    전부 "데이터 없음"으로 잘못 나왔습니다. 실제 매핑(광고→브랜드)으로 계정의 대표 브랜드를 찾습니다.
+  const acctBrand = useMemo(() => {
+    const cnt = {};
+    detailRows.forEach(r => {
+      const mp = mapByKey[r.match_key];
+      if (!mp || !r.account) return;
+      (cnt[r.account] = cnt[r.account] || {})[mp.brand] = (cnt[r.account][mp.brand] || 0) + 1;
+    });
+    const m = {};
+    Object.entries(cnt).forEach(([a, bs]) => { m[a] = Object.entries(bs).sort((x, y) => y[1] - x[1])[0][0]; });
+    return m;
+  }, [detailRows, mapByKey]);
+  const acctMatches = useCallback((account, fuzzy) => {
+    if (!account) return false;
+    const known = acctBrand[account];
+    if (known) return known === brand;
+    const b = acctBase(account);            // 매핑을 모르는 계정은 예전 방식대로
+    if (!b) return false;
+    return fuzzy ? (b === brand || brand.includes(b) || b.includes(brand)) : b === brand;
+  }, [acctBrand, brand]);
+
   // ─── 키워드/매체/시간대 집계 (선택 브랜드) ───
   const kwAgg = useMemo(() => {
     const g = {};
-    kwData.forEach(r => { if (acctBase(r.account) !== brand) return; const k = r.keyword || '-'; (g[k] = g[k] || { keyword: k, rows: [] }).rows.push(r); });
+    kwData.forEach(r => { if (!acctMatches(r.account)) return; const k = r.keyword || '-'; (g[k] = g[k] || { keyword: k, rows: [] }).rows.push(r); });
     return Object.values(g).map(x => ({ keyword: x.keyword, m: sumD(x.rows) })).filter(x => x.keyword && x.keyword !== '-');
-  }, [kwData, brand]);
+  }, [kwData, brand, acctMatches]);
   const topKw = useMemo(() => kwAgg.slice().sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 10), [kwAgg]);
   const wasteKw = useMemo(() => kwAgg.filter(x => x.m.cost >= 3000 && x.m.conversions === 0).sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
   const deviceRows = useMemo(() => {
     const g = {};
-    mediaData.forEach(r => { if (acctBase(r.account) !== brand) return; (g[r.device] = g[r.device] || []).push(r); });
+    mediaData.forEach(r => { if (!acctMatches(r.account)) return; (g[r.device] = g[r.device] || []).push(r); });
     return ['PC', '모바일'].filter(d => g[d]).map(d => ({ device: d, m: sumD(g[d]) }));
-  }, [mediaData, brand]);
+  }, [mediaData, brand, acctMatches]);
   const hourAgg = useMemo(() => {
-    const rows = hourData.filter(r => { const b = acctBase(r.account); return b && (b === brand || brand.includes(b) || b.includes(brand)); });
+    const rows = hourData.filter(r => acctMatches(r.account, true));
     const by = {};
     for (let h = 0; h < 24; h++) by[h] = { hour_num: h, cost: 0, conversions: 0, clicks: 0, impressions: 0, revenue: 0 };
     rows.forEach(r => { const b = by[r.hour_num]; if (b) { b.cost += +r.cost || 0; b.conversions += +r.conversions || 0; b.clicks += +r.clicks || 0; b.impressions += +r.impressions || 0; b.revenue += +r.revenue || 0; } });
     return Object.values(by);
-  }, [hourData, brand]);
+  }, [hourData, brand, acctMatches]);
   const hasHour = useMemo(() => hourAgg.some(h => h.impressions > 0), [hourAgg]);
   const topHours = useMemo(() => hourAgg.slice().filter(h => h.cost > 0).sort((a, b) => b.conversions - a.conversions || b.cost - a.cost).slice(0, 3), [hourAgg]);
 
@@ -379,7 +406,7 @@ export default function Report({ currentUser, allowedBrands }) {
     const g = {};
     demoData.forEach(r => {
       if (r.dim !== dim) return;
-      if (acctBase(r.account) !== brand) return;
+      if (!acctMatches(r.account)) return;
       const k = (r.label || '-').trim(); if (!k || k === '-') return;
       (g[k] = g[k] || { label: k, rows: [] }).rows.push(r);
     });
@@ -400,7 +427,7 @@ export default function Report({ currentUser, allowedBrands }) {
       arr.sort((a, b) => b.m.cost - a.m.cost);
     }
     return arr;
-  }, [demoData, brand]);
+  }, [demoData, brand, acctMatches]);
   const genderRows = useMemo(() => demoAgg('gender', 'gender'), [demoAgg]);
   const ageRows = useMemo(() => demoAgg('age', 'age'), [demoAgg]);
   const regionRows = useMemo(() => demoAgg('region', 'region').slice(0, 12), [demoAgg]);
@@ -417,6 +444,24 @@ export default function Report({ currentUser, allowedBrands }) {
     if (bestWd) parts.push(`요일별로는 ${bestWd.label}의 효율이 가장 좋았습니다.`);
     return parts.join(' ');
   }, [thisRows, cur, prev, byType, byWeekday, P.label]);
+
+  // 담당자 코멘트 기본 문구 — 데이터로 자동 작성, 담당자가 수정·삭제 가능 (2026-08-04 대표님 지시)
+  const autoComment = useMemo(() => {
+    if (!thisRows.length) return '';
+    const L = [];
+    const gRoas = growth(roasOf(cur), roasOf(prev));
+    L.push(`이번 ${P.label} 구매완료 ROAS는 ${roasStr(roasOf(cur))}로 ${cmpOk ? '비교기간' : '전기간'} 대비 ${gRoas >= 0 ? '+' : ''}${gRoas.toFixed(0)}% ${gRoas >= 0 ? '개선' : '하락'}했습니다.`);
+    const bestType = byType.slice().sort((a, b) => roasOf(b.m) - roasOf(a.m))[0];
+    if (bestType && byType.length > 1) L.push(`효율이 가장 좋은 '${bestType.type}'(ROAS ${roasStr(roasOf(bestType.m))}) 중심으로 예산을 운용하겠습니다.`);
+    if (topKw.length) L.push(`'${topKw[0].keyword}' 등 상위 키워드가 매출을 이끌었습니다.`);
+    if (wasteKw.length) L.push(`전환 없이 비용만 발생한 키워드 ${wasteKw.length}개는 입찰 조정·제외를 검토하겠습니다.`);
+    if (!detailLoading && wasteAds.length) L.push(`낭비 의심 광고 ${wasteAds.length}건은 소재·랜딩 점검 대상입니다.`);
+    const bestWd = byWeekday.slice().sort((a, b) => roasOf(b.m) - roasOf(a.m))[0];
+    if (bestWd && byWeekday.length > 2) L.push(`요일 중에는 ${bestWd.label} 효율이 좋아 해당 요일 노출 강화를 검토합니다.`);
+    return L.join('\n');
+  }, [thisRows, cur, prev, byType, topKw, wasteKw, wasteAds, byWeekday, P.label, cmpOk, detailLoading]);
+  const [commentEdited, setCommentEdited] = useState(false);
+  useEffect(() => { if (!commentEdited) setComment(autoComment); }, [autoComment, commentEdited]);
 
   const kakaoText = useMemo(() => {
     if (!thisRows.length) return '';
@@ -573,7 +618,7 @@ export default function Report({ currentUser, allowedBrands }) {
     METRICS.forEach((mt, ri) => {
       const cv = mt.get(cur), pv = mt.get(prev), diff = cv - pv, g = growth(cv, pv);
       const good = mt.invert ? diff < 0 : diff > 0;
-      const dcol = Math.abs(diff) < 1e-9 ? XC.sub : good ? XC.ok : XC.no;
+      const dcol = (Math.abs(diff) < 1e-9 || mt.key === 'cost') ? XC.sub : good ? XC.ok : XC.no;
       const row = ws.getRow(8 + ri);
       const vals = [mt.label + (mt.invert ? ' (낮을수록 좋음)' : ''), cv, pv, diff, g];
       vals.forEach((v, i) => {
@@ -653,8 +698,11 @@ export default function Report({ currentUser, allowedBrands }) {
   // 기간 비교표 행
   const cmpRows = METRICS.map(mt => {
     const cv = mt.get(cur), pv = mt.get(prev), diff = cv - pv, g = growth(cv, pv);
-    // 색상은 '부호' 기준으로 통일: 증가(+)=초록, 감소(−)=빨강, 변화없음=회색
-    const col = (Math.abs(g) < 0.05 && diff === 0) ? R.sub : diff > 0 ? R.ok : diff < 0 ? R.no : R.sub;
+    // 색상은 '좋고 나쁨' 기준(2026-08-04): 좋아지면 초록, 나빠지면 빨강.
+    //   CPC·CPA(↓좋음)는 감소가 초록. 광고비는 중립이라 회색.
+    const neutral = mt.key === 'cost';
+    const good = mt.invert ? diff < 0 : diff > 0;
+    const col = (diff === 0 || neutral) ? R.sub : good ? R.ok : R.no;
     return {
       label: mt.label + (mt.invert ? ' ↓좋음' : ''),
       cells: [
@@ -751,7 +799,7 @@ export default function Report({ currentUser, allowedBrands }) {
           </div>
           {/* 핵심 지표 */}
           <div className="rpt-avoid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-            <Kpi label="광고비" value={won(cur.cost)} cur={cur.cost} prev={prev.cost} />
+            <Kpi label="광고비" value={won(cur.cost)} cur={cur.cost} prev={prev.cost} neutral />
             <Kpi label="구매완료 전환매출액" value={won(cur.revenue)} cur={cur.revenue} prev={prev.revenue} />
             <Kpi label="구매완료 ROAS" value={roasStr(roasOf(cur))} cur={roasOf(cur)} prev={roasOf(prev)} />
             <Kpi label="구매완료 전환수" value={num(cur.conversions) + '건'} cur={cur.conversions} prev={prev.conversions} />
@@ -817,7 +865,7 @@ export default function Report({ currentUser, allowedBrands }) {
           </div>
 
           {/* 기간 상세 비교 */}
-          <Section title="기간 상세 비교" sub={`이번 ${P.label}(${kdate(thisFrom)}~${kdate(thisTo)}) vs ${cmpOk ? '지정 비교기간' : '전기간'}(${kdate(prevFrom)}~${kdate(prevTo)}) — 전 지표 · 증가(+)는 초록, 감소(−)는 빨강 · '↓좋음' 표시 지표는 낮을수록 좋습니다`}>
+          <Section title="기간 상세 비교" sub={`이번 ${P.label}(${kdate(thisFrom)}~${kdate(thisTo)}) vs ${cmpOk ? '지정 비교기간' : '전기간'}(${kdate(prevFrom)}~${kdate(prevTo)}) — 전 지표 · 좋아지면 초록, 나빠지면 빨강 · '↓좋음' 지표는 낮을수록 좋음 · 광고비는 중립(회색)`}>
             <MetricTable head={['지표', '이번 기간', cmpOk ? '비교기간' : '전기간', '증감', '증감률']} rows={cmpRows} />
           </Section>
 
@@ -856,7 +904,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 키워드 인사이트 (검색광고만) */}
           {channel === 'search' && (
-            <Section title="키워드 인사이트" sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
+            <Section title="키워드 인사이트" className={kwAgg.length === 0 ? 'no-print' : ''} sub="성과가 좋은 키워드는 확장·증액, 비용만 나간 키워드는 점검·제외 대상입니다.">
               {kwAgg.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 키워드 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div>
@@ -875,7 +923,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 매체별 (검색광고만) */}
           {channel === 'search' && (
-            <Section title="매체별 성과 (PC / 모바일)">
+            <Section title="매체별 성과 (PC / 모바일)" className={deviceRows.length === 0 ? 'no-print' : ''}>
               {deviceRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 매체별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <div>
               <div style={{ marginBottom: 12 }}><ChartBlock items={deviceRows.map(d => ({ label: d.device, spend: d.m.cost, revenue: d.m.revenue, roas: roasOf(d.m) }))} /></div>
@@ -888,7 +936,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 시간대별 (검색광고만) */}
           {channel === 'search' && (
-            <Section title="시간대별 성과" sub={hasHour ? `전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)` : ''}>
+            <Section title="시간대별 성과" className={hasHour ? '' : 'no-print'} sub={hasHour ? `전환이 많은 시간: ${topHours.map(h => h.hour_num + '시').join(', ') || '-'} · 광고비(막대, 파란색=집중 시간대)` : ''}>
               {!hasHour ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 시간대별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <ChartBlock items={hourAgg.map(h => ({ label: h.hour_num + '시', spend: h.cost, revenue: h.revenue }))} />
               )}
@@ -897,7 +945,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 성별 (검색광고만) */}
           {channel === 'search' && (
-            <Section title="성별 성과" sub="어떤 성별에서 전환이 잘 나오는지 — 타겟 조정·소재 방향의 근거가 됩니다.">
+            <Section title="성별 성과" className={genderRows.length === 0 ? 'no-print' : ''} sub="어떤 성별에서 전환이 잘 나오는지 — 타겟 조정·소재 방향의 근거가 됩니다.">
               {genderRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 성별 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <div>
                 <div style={{ marginBottom: 12 }}><ChartBlock items={genderRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
@@ -909,7 +957,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 연령대 (검색광고만) */}
           {channel === 'search' && (
-            <Section title="연령대 성과" sub="연령대별 반응 — 예산을 어느 연령에 집중할지 판단하는 기준입니다.">
+            <Section title="연령대 성과" className={ageRows.length === 0 ? 'no-print' : ''} sub="연령대별 반응 — 예산을 어느 연령에 집중할지 판단하는 기준입니다.">
               {ageRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 연령대 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <div>
                 <div style={{ marginBottom: 12 }}><ChartBlock items={ageRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
@@ -921,7 +969,7 @@ export default function Report({ currentUser, allowedBrands }) {
 
           {/* 지역 (검색광고만) */}
           {channel === 'search' && (
-            <Section title="지역별 성과 (상위 12)" sub="지역별 성과 — 지역 타겟팅·매장 연계 프로모션에 참고하세요.">
+            <Section title="지역별 성과 (상위 12)" className={regionRows.length === 0 ? 'no-print' : ''} sub="지역별 성과 — 지역 타겟팅·매장 연계 프로모션에 참고하세요.">
               {regionRows.length === 0 ? <div style={{ fontSize: 13, color: R.sub, padding: 10 }}>이 브랜드의 지역 데이터가 아직 없습니다. 매일 아침 자동수집 후 표시됩니다.</div> : (
               <div>
                 <div style={{ marginBottom: 12 }}><ChartBlock items={regionRows.map(d => ({ label: d.label, spend: d.m.cost, revenue: d.m.revenue }))} /></div>
@@ -943,14 +991,21 @@ export default function Report({ currentUser, allowedBrands }) {
           )}
 
           {/* 변경 이력 */}
-          <Section title="이번 기간 변경 이력" sub="무엇을, 왜 바꿨는지 적어주세요 (예: OO 키워드 입찰 인상, XX 소재 교체). 인쇄 시 함께 나갑니다.">
+          <Section title="이번 기간 변경 이력" className={changeLog.trim() ? '' : 'no-print'} sub="무엇을, 왜 바꿨는지 적어주세요 (예: OO 키워드 입찰 인상, XX 소재 교체). 인쇄 시 함께 나갑니다.">
             <textarea className="rpt-avoid" value={changeLog} onChange={e => setChangeLog(e.target.value)} placeholder="예) 7/12 '남자팬티' 입찰 +10% / 7/14 리타겟 소재 2종 교체 / 7/15 효율 낮은 쇼핑 캠페인 예산 -20%"
               style={{ width: '100%', minHeight: 70, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </Section>
 
-          {/* 코멘트 */}
-          <Section title="담당자 코멘트 · 다음 제안">
-            <textarea className="rpt-avoid" value={comment} onChange={e => setComment(e.target.value)} placeholder="이번 기간 분석과 다음 기간 제안을 적어주세요 (인쇄 시 함께 나갑니다)"
+          {/* 코멘트 — 기본 문구 자동 작성, 수정·삭제 가능 */}
+          <Section title="담당자 코멘트 · 다음 제안" className={comment.trim() ? '' : 'no-print'}>
+            <div className="no-print" style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+              <button onClick={() => { setComment(autoComment); setCommentEdited(false); }}
+                style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${R.line}`, background: '#fff', color: R.ac, cursor: 'pointer', fontSize: 11.5, fontWeight: 600 }}>↺ 자동 문구로 되돌리기</button>
+              <button onClick={() => { setComment(''); setCommentEdited(true); }}
+                style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${R.line}`, background: '#fff', color: R.no, cursor: 'pointer', fontSize: 11.5 }}>🗑 비우기 (인쇄에서 제외)</button>
+              <span style={{ fontSize: 11, color: R.sub, alignSelf: 'center' }}>기본 문구는 데이터로 자동 작성됩니다 — 자유롭게 고쳐 쓰세요</span>
+            </div>
+            <textarea className="rpt-avoid" value={comment} onChange={e => { setComment(e.target.value); setCommentEdited(true); }} placeholder="이번 기간 분석과 다음 기간 제안을 적어주세요 (인쇄 시 함께 나갑니다)"
               style={{ width: '100%', minHeight: 90, border: `1px solid ${R.line}`, borderRadius: 12, padding: 14, fontSize: 13, lineHeight: 1.6, color: R.ink, resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </Section>
 
