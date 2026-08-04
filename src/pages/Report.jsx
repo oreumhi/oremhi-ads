@@ -430,14 +430,15 @@ export default function Report({ currentUser, allowedBrands }) {
 
   const copyKakao = async () => { try { await navigator.clipboard.writeText(kakaoText); alert('카톡용 요약을 복사했습니다.'); } catch { alert('복사 실패'); } };
 
-  // ─── 엑셀 다운로드 (2026-08-04 대표님 지시) ───
-  //  XLSX 라이브러리는 버튼을 누를 때만 CDN에서 한 번 불러온다 (평소 화면 속도에 영향 없음).
+  // ─── 엑셀 다운로드 (2026-08-04 대표님 지시 · 같은 날 디자인 개선) ───
+  //  ExcelJS: 셀 색·서식을 지원해 PDF 리포트와 같은 디자인으로 꾸밀 수 있다.
+  //  버튼을 누를 때만 CDN에서 한 번 불러온다 (평소 화면 속도에 영향 없음).
   //  CDN이 막힌 환경이면 엑셀에서 열리는 CSV로 자동 대체.
-  const loadXlsxLib = () => new Promise((resolve, reject) => {
-    if (window.XLSX) return resolve(window.XLSX);
+  const loadExcelLib = () => new Promise((resolve, reject) => {
+    if (window.ExcelJS) return resolve(window.ExcelJS);
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('XLSX 없음'));
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    s.onload = () => window.ExcelJS ? resolve(window.ExcelJS) : reject(new Error('ExcelJS 없음'));
     s.onerror = () => reject(new Error('CDN 차단'));
     document.head.appendChild(s);
   });
@@ -483,21 +484,143 @@ export default function Report({ currentUser, allowedBrands }) {
     return sheets;
   };
 
+  // PDF 리포트와 같은 색 (ARGB)
+  const XC = { ac: 'FF3A6FF0', pur: 'FF7B61FF', ok: 'FF12B886', no: 'FFF0455A', warn: 'FFDD8500',
+    pink: 'FFE64980', ink: 'FF1B2536', sub: 'FF6B7688', soft: 'FFF5F7FB', line: 'FFE6E9EF',
+    white: 'FFFFFFFF', info: 'FFEEF3FF' };
+  const GRAD = { type: 'gradient', gradient: 'angle', degree: 135,
+    stops: [{ position: 0, color: { argb: XC.ac } }, { position: 1, color: { argb: XC.pur } }] };
+  const FILL = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+  const THIN = { style: 'thin', color: { argb: XC.line } };
+  const BORD = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  // 표준 10개 지표 열의 서식 (노출·클릭·CTR·CPC·광고비·전환·전환율·CPA·매출·ROAS)
+  const XMETA = [
+    { fmt: '#,##0' }, { fmt: '#,##0' }, { fmt: '0.00"%"' }, { fmt: '"₩"#,##0' },
+    { fmt: '"₩"#,##0', color: XC.warn, bold: true }, { fmt: '#,##0', color: XC.ok, bold: true },
+    { fmt: '0.0"%"' }, { fmt: '"₩"#,##0', color: XC.sub }, { fmt: '"₩"#,##0', color: XC.pink },
+    { fmt: '0"%"', roas: true },
+  ];
+
+  const xAddTable = (wb, name, heads, rows, meta, opts = {}) => {
+    const ws = wb.addWorksheet(name.slice(0, 31));
+    const nCols = heads.length, lab = opts.labelCols || 1;
+    ws.columns = heads.map((_, i) => ({ width: i === 0 ? 24 : i < lab ? 12 : 13 }));
+    ws.mergeCells(1, 1, 1, nCols);
+    const t = ws.getCell(1, 1);
+    t.value = `${name} — ${brand}`;
+    t.fill = GRAD; t.font = { bold: true, size: 13, color: { argb: XC.white } };
+    t.alignment = { vertical: 'middle' }; ws.getRow(1).height = 26;
+    ws.mergeCells(2, 1, 2, nCols);
+    const s2 = ws.getCell(2, 1);
+    s2.value = `${channel === 'gfa' ? '디스플레이광고(GFA)' : '검색광고'} · ${thisFrom} ~ ${thisTo}` + (opts.sub ? ` · ${opts.sub}` : '');
+    s2.font = { size: 9.5, color: { argb: XC.sub } };
+    const hr = ws.getRow(4);
+    heads.forEach((h, i) => {
+      const c = hr.getCell(i + 1);
+      c.value = h; c.fill = FILL(XC.soft); c.border = BORD;
+      c.font = { bold: true, size: 10, color: { argb: XC.sub } };
+      c.alignment = { horizontal: i < lab ? 'left' : 'right' };
+    });
+    rows.forEach((r, ri) => {
+      const row = ws.getRow(5 + ri);
+      const isTotal = opts.totalLast && ri === rows.length - 1;
+      r.forEach((v, i) => {
+        const c = row.getCell(i + 1); c.value = v; c.border = BORD;
+        const m = i >= lab ? (meta[i - lab] || null) : null;
+        if (m) {
+          c.numFmt = m.fmt; c.alignment = { horizontal: 'right' };
+          let color = m.color, bold = m.bold;
+          if (m.roas) { color = v >= 300 ? XC.ok : v < 100 ? XC.no : XC.ink; bold = true; }
+          c.font = { size: 10, bold: !!bold || isTotal, color: { argb: color || XC.ink } };
+        } else {
+          c.font = { size: 10, bold: i === 0, color: { argb: i === 0 ? XC.ink : XC.sub } };
+          c.alignment = { horizontal: 'left' };
+        }
+        if (isTotal) c.fill = FILL(XC.soft);
+      });
+    });
+    ws.views = [{ state: 'frozen', ySplit: 4 }];
+    return ws;
+  };
+
+  const buildStyledWb = (X) => {
+    const wb = new X.Workbook();
+    wb.creator = '주식회사 오름히';
+    // ── 요약: PDF 첫 화면과 같은 배너 + 전 지표 비교 ──
+    const ws = wb.addWorksheet('요약');
+    ws.columns = [{ width: 30 }, { width: 17 }, { width: 17 }, { width: 15 }, { width: 12 }];
+    ws.mergeCells('A1:E1'); ws.mergeCells('A2:E2'); ws.mergeCells('A3:E3');
+    const b1 = ws.getCell('A1'), b2 = ws.getCell('A2'), b3 = ws.getCell('A3');
+    b1.fill = GRAD; b2.fill = GRAD; b3.fill = GRAD;   // 병합 셀은 왼쪽 위 서식이 전체에 적용됨
+    b1.value = 'OREUMHI · 광고 성과 리포트';
+    b1.font = { size: 11, color: { argb: XC.white } }; ws.getRow(1).height = 20;
+    b2.value = brand; b2.font = { size: 22, bold: true, color: { argb: XC.white } }; ws.getRow(2).height = 32;
+    b3.value = `${channel === 'gfa' ? '디스플레이광고(GFA)' : '검색광고'} · ${P.label} 성과 리포트 · ${thisFrom} ~ ${thisTo}  (${cmpOk ? '지정 비교기간' : '전기간'}: ${prevFrom} ~ ${prevTo}) · 생성일 ${ymd(new Date())}`;
+    b3.font = { size: 9.5, color: { argb: XC.white } }; ws.getRow(3).height = 18;
+    ws.mergeCells('A5:E5');
+    const inf = ws.getCell('A5');
+    inf.value = 'ℹ 본 리포트의 모든 전환·매출·ROAS 지표는 ‘구매완료’ 기준입니다. (장바구니 담기 등은 제외)';
+    inf.fill = FILL(XC.info); inf.font = { size: 9.5, bold: true, color: { argb: XC.ac } };
+    const hd = ws.getRow(7);
+    ['지표', '이번 기간', cmpOk ? '비교기간' : '전기간', '증감', '증감률'].forEach((h, i) => {
+      const c = hd.getCell(i + 1); c.value = h; c.fill = FILL(XC.soft); c.border = BORD;
+      c.font = { bold: true, size: 10, color: { argb: XC.sub } };
+      c.alignment = { horizontal: i === 0 ? 'left' : 'right' };
+    });
+    const FMT = { impressions: '#,##0', clicks: '#,##0', ctr: '0.00"%"', cpc: '"₩"#,##0', cost: '"₩"#,##0',
+      conversions: '#,##0', cvr: '0.0"%"', cpa: '"₩"#,##0', revenue: '"₩"#,##0', roas: '0"%"' };
+    METRICS.forEach((mt, ri) => {
+      const cv = mt.get(cur), pv = mt.get(prev), diff = cv - pv, g = growth(cv, pv);
+      const good = mt.invert ? diff < 0 : diff > 0;
+      const dcol = Math.abs(diff) < 1e-9 ? XC.sub : good ? XC.ok : XC.no;
+      const row = ws.getRow(8 + ri);
+      const vals = [mt.label + (mt.invert ? ' (낮을수록 좋음)' : ''), cv, pv, diff, g];
+      vals.forEach((v, i) => {
+        const c = row.getCell(i + 1); c.value = i >= 1 ? +(+v).toFixed(2) : v; c.border = BORD;
+        if (i === 0) { c.font = { size: 10, bold: true, color: { argb: XC.ink } }; }
+        else {
+          c.numFmt = i === 4 ? '+0.0"%";-0.0"%";0"%"' : FMT[mt.key];
+          c.alignment = { horizontal: 'right' };
+          c.font = { size: 10, bold: i === 1 || i >= 3, color: { argb: i === 1 ? XC.ink : i === 2 ? XC.sub : dcol } };
+        }
+      });
+    });
+    ws.views = [{ state: 'frozen', ySplit: 7 }];
+
+    // ── 데이터 시트들 (PDF 표와 같은 색 구성) ──
+    xAddTable(wb, '일별', ['일자', ...XHEAD], [...daily.map(d => [d.date, ...xr(d)]), ['합계', ...xr(cur)]], XMETA, { totalLast: true });
+    if (byWeekday.length) xAddTable(wb, '요일별', ['요일', ...XHEAD], [...byWeekday.map(w => [w.label, ...xr(w.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
+    if (byType.length) xAddTable(wb, '광고유형별', ['광고유형', ...XHEAD], [...byType.map(t2 => [t2.type, ...xr(t2.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
+    if (topAds.length) xAddTable(wb, '상위광고', ['광고', '유형', ...XHEAD], topAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '매출 기준 상위' });
+    if (channel === 'search') {
+      if (topKw.length) xAddTable(wb, '키워드 TOP10', ['키워드', ...XHEAD], topKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '매출 기준' });
+      if (wasteKw.length) xAddTable(wb, '낭비 키워드', ['키워드', ...XHEAD], wasteKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '비용 발생·전환 0 — 점검·제외 대상' });
+      if (deviceRows.length) xAddTable(wb, '매체별', ['매체', ...XHEAD], deviceRows.map(d => [d.device, ...xr(d.m)]), XMETA);
+      if (hasHour) xAddTable(wb, '시간대별', ['시간', '광고비', '노출수', '클릭수', '전환수', '매출'],
+        hourAgg.map(h => [h.hour_num + '시', Math.round(h.cost), h.impressions, h.clicks, h.conversions, Math.round(h.revenue)]),
+        [{ fmt: '"₩"#,##0', color: XC.warn, bold: true }, { fmt: '#,##0' }, { fmt: '#,##0' }, { fmt: '#,##0', color: XC.ok, bold: true }, { fmt: '"₩"#,##0', color: XC.pink }]);
+      if (genderRows.length) xAddTable(wb, '성별', ['성별', ...XHEAD], genderRows.map(d => [d.label, ...xr(d.m)]), XMETA);
+      if (ageRows.length) xAddTable(wb, '연령대', ['연령대', ...XHEAD], ageRows.map(d => [d.label, ...xr(d.m)]), XMETA);
+      if (regionRows.length) xAddTable(wb, '지역별', ['지역', ...XHEAD], regionRows.map(d => [d.label, ...xr(d.m)]), XMETA, { sub: '상위 12' });
+    }
+    if (wasteAds.length) xAddTable(wb, '낭비의심광고', ['광고', '유형', ...XHEAD], wasteAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '비용 발생·전환 0' });
+    return wb;
+  };
+
   const downloadExcel = async () => {
     if (!brand || !thisRows.length) { alert('선택한 기간에 데이터가 없습니다.'); return; }
     const fname = `리포트_${brand}_${thisFrom}_${thisTo}`;
-    const sheets = buildSheets();
     try {
-      const X = await loadXlsxLib();
-      const wb = X.utils.book_new();
-      sheets.forEach(([name, aoa]) => {
-        const ws = X.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = (aoa.find(r => r.length > 2) || []).map((_, i) => ({ wch: i === 0 ? 22 : 13 }));
-        X.utils.book_append_sheet(wb, ws, name.slice(0, 31));
-      });
-      X.writeFile(wb, fname + '.xlsx');
+      const X = await loadExcelLib();
+      const wb = buildStyledWb(X);
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = fname + '.xlsx';
+      a.click(); URL.revokeObjectURL(a.href);
     } catch {
       // CDN이 막혔으면 CSV(BOM)로 대체 — 엑셀에서 바로 열립니다
+      const sheets = buildSheets();
       const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
       const csv = sheets.map(([name, aoa]) => `[${name}]\n` + aoa.map(r => r.map(esc).join(',')).join('\n')).join('\n\n');
       const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
