@@ -672,10 +672,11 @@ export default function Report({ currentUser, allowedBrands }) {
     if (byType.length) xAddTable(wb, '광고유형별', ['광고유형', ...XHEAD], [...byType.map(t2 => [t2.type, ...xr(t2.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
     if (topAds.length) xAddTable(wb, '상위광고', ['광고', '유형', ...XHEAD], topAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '매출 기준 상위' });
     if (channel === 'search' && kwAgg.length) {
-      xAddTable(wb, '키워드-매출TOP10', ['키워드', ...XHEAD], topKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: kwHead });
-      xAddTable(wb, '키워드-광고비TOP10', ['키워드', ...XHEAD], costKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '예산이 어디로 갔나' });
-      if (roasKw.length) xAddTable(wb, '키워드-효율TOP10', ['키워드', ...XHEAD], roasKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: `클릭 ${KW_MIN_CLICKS}회 이상만 — 재현 가능성 높은 키워드` });
+      // 화면과 같은 순서 — 자주 비는 항목(효율·숨은보석)을 뒤로
+      if (topKw.length) xAddTable(wb, '키워드-매출TOP10', ['키워드', ...XHEAD], topKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: kwHead });
+      if (costKw.length) xAddTable(wb, '키워드-광고비TOP10', ['키워드', ...XHEAD], costKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '예산이 어디로 갔나' });
       if (actionKw.length) xAddTable(wb, '키워드-조치대상', ['키워드', ...XHEAD], actionKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '전환 0 또는 ROAS 100% 미만' });
+      if (roasKw.length) xAddTable(wb, '키워드-효율TOP10', ['키워드', ...XHEAD], roasKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: `클릭 ${KW_MIN_CLICKS}회 이상만 — 재현 가능성 높은 키워드` });
       if (gemKw.length) xAddTable(wb, '키워드-숨은보석', ['키워드', ...XHEAD], gemKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '적게 쓰고 잘 번 키워드 — 증액 후보' });
     }
     if (wasteAds.length) xAddTable(wb, '낭비의심광고', ['광고', '유형', ...XHEAD], wasteAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '비용 발생·전환 0' });
@@ -947,43 +948,39 @@ export default function Report({ currentUser, allowedBrands }) {
               rows={topAds.map(a => ({ label: a.label, cells: [{ v: a.type, color: R.sub }, ...stdCells(a.m)] }))} />}
           </Section>
 
-          {/* 키워드 요약 — 전 키워드는 실을 수 없어 관점별 TOP10으로 (검색광고만) */}
-          {channel === 'search' && kwAgg.length > 0 && (
-            <Section title="키워드 요약" sub={kwHead}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.pink, marginBottom: 6 }}>① 매출 기여 TOP 10 — 어디서 돈을 벌었나</div>
-                  <MetricTable head={['키워드', ...STD_HEAD]} rows={topKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
+          {/* 키워드 요약 — 전 키워드는 실을 수 없어 관점별 TOP10으로 (검색광고만)
+              데이터가 없는 블록은 빼고, 남은 블록에만 ①②③… 번호를 다시 매긴다.
+              (2026-08-04 대표님 지적: 빠진 블록 때문에 번호가 건너뜀)
+              순서도 '자주 비는 항목'을 뒤로 — 효율·숨은보석은 기준선 때문에 자주 비어 있음 */}
+          {channel === 'search' && kwAgg.length > 0 && (() => {
+            const NUM = ['①', '②', '③', '④', '⑤', '⑥'];
+            const blocks = [
+              topKw.length && { color: R.pink, title: '매출 기여 TOP 10 — 어디서 돈을 벌었나', rows: topKw, head: [...STD_HEAD],
+                cells: (k) => stdCells(k.m) },
+              costKw.length && { color: R.warn, title: '광고비 TOP 10 — 예산이 어디로 갔나', rows: costKw, head: [...STD_HEAD, '비중'],
+                cells: (k) => [...stdCells(k.m), { v: (kwTotal.cost > 0 ? k.m.cost / kwTotal.cost * 100 : 0).toFixed(1) + '%', color: R.sub }] },
+              actionKw.length && { color: R.no, title: '조치 대상 — 전환 0 또는 ROAS 100% 미만', rows: actionKw, head: [...STD_HEAD],
+                note: '비용은 나갔지만 본전을 넘기지 못한 키워드입니다. 입찰 조정·제외 또는 랜딩 점검 대상입니다.', cells: (k) => stdCells(k.m) },
+              roasKw.length && { color: R.ok, title: `효율 TOP 10 — 클릭 ${KW_MIN_CLICKS}회 이상만`, rows: roasKw, head: [...STD_HEAD],
+                note: '클릭이 적어 우연히 효율이 높게 잡힌 키워드는 제외했습니다. 다음 기간에도 재현될 가능성이 높은 키워드입니다.', cells: (k) => stdCells(k.m) },
+              gemKw.length && { color: R.pur, title: '숨은 보석 — 적게 쓰고 잘 번 키워드 (증액 후보)', rows: gemKw, head: [...STD_HEAD],
+                note: `광고비는 전체의 1% 미만인데 효율은 평균(${roasStr(roasOf(kwTotal))})의 2배 이상입니다. 예산을 더 넣으면 매출이 늘어날 여지가 있습니다.`, cells: (k) => stdCells(k.m) },
+            ].filter(Boolean);
+            if (!blocks.length) return null;
+            return (
+              <Section title="키워드 요약" sub={kwHead}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  {blocks.map((b, i) => (
+                    <div key={b.title}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: b.color, marginBottom: 6 }}>{NUM[i]} {b.title}</div>
+                      {b.note && <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>{b.note}</div>}
+                      <MetricTable head={['키워드', ...b.head]} rows={b.rows.map(k => ({ label: k.keyword, cells: b.cells(k) }))} />
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.warn, marginBottom: 6 }}>② 광고비 TOP 10 — 예산이 어디로 갔나</div>
-                  <MetricTable head={['키워드', ...STD_HEAD, '비중']}
-                    rows={costKw.map(k => ({ label: k.keyword, cells: [...stdCells(k.m), { v: (kwTotal.cost > 0 ? k.m.cost / kwTotal.cost * 100 : 0).toFixed(1) + '%', color: R.sub }] }))} />
-                </div>
-                {roasKw.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: R.ok, marginBottom: 6 }}>③ 효율 TOP 10 — 클릭 {KW_MIN_CLICKS}회 이상만</div>
-                    <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>클릭이 적어 우연히 효율이 높게 잡힌 키워드는 제외했습니다. 다음 기간에도 재현될 가능성이 높은 키워드입니다.</div>
-                    <MetricTable head={['키워드', ...STD_HEAD]} rows={roasKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
-                  </div>
-                )}
-                {actionKw.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: R.no, marginBottom: 6 }}>④ 조치 대상 — 전환 0 또는 ROAS 100% 미만</div>
-                    <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>비용은 나갔지만 본전을 넘기지 못한 키워드입니다. 입찰 조정·제외 또는 랜딩 점검 대상입니다.</div>
-                    <MetricTable head={['키워드', ...STD_HEAD]} rows={actionKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
-                  </div>
-                )}
-                {gemKw.length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: R.pur, marginBottom: 6 }}>⑤ 숨은 보석 — 적게 쓰고 잘 번 키워드 (증액 후보)</div>
-                    <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>광고비는 전체의 1% 미만인데 효율은 평균({roasStr(roasOf(kwTotal))})의 2배 이상입니다. 예산을 더 넣으면 매출이 늘어날 여지가 있습니다.</div>
-                    <MetricTable head={['키워드', ...STD_HEAD]} rows={gemKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
-                  </div>
-                )}
-              </div>
-            </Section>
-          )}
+              </Section>
+            );
+          })()}
 
 
 
