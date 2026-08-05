@@ -390,6 +390,46 @@ export default function Report({ currentUser, allowedBrands }) {
   }, [kwData, brand, acctMatches]);
   const topKw = useMemo(() => kwAgg.slice().sort((a, b) => (b.m.revenue - a.m.revenue) || (b.m.conversions - a.m.conversions) || (b.m.clicks - a.m.clicks)).slice(0, 10), [kwAgg]);
   const wasteKw = useMemo(() => kwAgg.filter(x => x.m.cost >= 3000 && x.m.conversions === 0).sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
+
+  // ─── 키워드 5블록 (2026-08-04 대표님 지시) ───
+  //  전 키워드를 다 싣는 건 불가능하므로 관점별 TOP10으로 요약한다.
+  //  ※ 효율(ROAS) 순위에는 '클릭 20회 이상' 기준선을 건다.
+  //     기준선이 없으면 클릭 1회·전환 1건짜리(ROAS 3만%)가 1등이 되어
+  //     다음 주면 순위가 통째로 바뀐다 — 광고주에게 잘못된 신호를 준다.
+  const KW_MIN_CLICKS = 20;
+  const kwTotal = useMemo(() => sumD(kwAgg.map(x => x.m)), [kwAgg]);
+  const costKw = useMemo(() => kwAgg.filter(x => x.m.cost > 0)
+    .sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
+  const roasKw = useMemo(() => kwAgg.filter(x => x.m.clicks >= KW_MIN_CLICKS && x.m.revenue > 0)
+    .sort((a, b) => roasOf(b.m) - roasOf(a.m)).slice(0, 10), [kwAgg]);
+  // 조치 대상: 비용 상위인데 전환 0 이거나 ROAS 100% 미만(밑지는 장사)
+  const actionKw = useMemo(() => kwAgg
+    .filter(x => x.m.cost >= 3000 && (x.m.conversions === 0 || roasOf(x.m) < 100))
+    .sort((a, b) => b.m.cost - a.m.cost).slice(0, 10), [kwAgg]);
+  // 숨은 보석: 비용은 적게 썼는데(전체의 1% 미만) 효율이 평균의 2배 이상 → 증액 후보
+  const gemKw = useMemo(() => {
+    const avg = roasOf(kwTotal);
+    if (!(avg > 0) || !kwTotal.cost) return [];
+    const cap = kwTotal.cost * 0.01;
+    return kwAgg.filter(x => x.m.cost > 0 && x.m.cost <= cap && x.m.conversions >= 1
+        && x.m.clicks >= 5 && roasOf(x.m) >= avg * 2)
+      .sort((a, b) => roasOf(b.m) - roasOf(a.m)).slice(0, 10);
+  }, [kwAgg, kwTotal]);
+  // 한 줄 요약: 상위 5개가 광고비·매출의 몇 %를 담당하는지 (쏠림 여부)
+  const kwHead = useMemo(() => {
+    if (!kwAgg.length || !kwTotal.cost) return '';
+    const top5c = kwAgg.slice().sort((a, b) => b.m.cost - a.m.cost).slice(0, 5);
+    const cShare = top5c.reduce((s, x) => s + x.m.cost, 0) / kwTotal.cost * 100;
+    const rShare = kwTotal.revenue > 0
+      ? kwAgg.slice().sort((a, b) => b.m.revenue - a.m.revenue).slice(0, 5)
+          .reduce((s, x) => s + x.m.revenue, 0) / kwTotal.revenue * 100 : 0;
+    const conv = kwAgg.filter(x => x.m.conversions > 0).length;
+    const tone = cShare >= 70 ? '소수 키워드에 집중된 구조입니다'
+      : cShare <= 30 ? '여러 키워드에 고르게 분산된 구조입니다' : '';
+    return `키워드 ${fmtNum(kwAgg.length)}개 · 상위 5개가 광고비의 ${cShare.toFixed(0)}%`
+      + (rShare ? `, 매출의 ${rShare.toFixed(0)}%` : '') + `를 담당 · 전환이 난 키워드 ${conv}개`
+      + (tone ? ` — ${tone}` : '');
+  }, [kwAgg, kwTotal]);
   const deviceRows = useMemo(() => {
     const g = {};
     mediaData.forEach(r => { if (!acctMatches(r.account)) return; (g[r.device] = g[r.device] || []).push(r); });
@@ -458,12 +498,13 @@ export default function Report({ currentUser, allowedBrands }) {
     const bestType = byType.slice().sort((a, b) => roasOf(b.m) - roasOf(a.m))[0];
     if (bestType && byType.length > 1) L.push(`효율이 가장 좋은 '${bestType.type}'(ROAS ${roasStr(roasOf(bestType.m))}) 중심으로 예산을 운용하겠습니다.`);
     if (topKw.length) L.push(`'${topKw[0].keyword}' 등 상위 키워드가 매출을 이끌었습니다.`);
-    if (wasteKw.length) L.push(`전환 없이 비용만 발생한 키워드 ${wasteKw.length}개는 입찰 조정·제외를 검토하겠습니다.`);
+    if (actionKw.length) L.push(`본전을 넘기지 못한 키워드 ${actionKw.length}개는 입찰 조정·제외를 검토하겠습니다.`);
+    if (gemKw.length) L.push(`'${gemKw[0].keyword}'는 적은 비용으로 ROAS ${roasStr(roasOf(gemKw[0].m))}를 기록했습니다. 예산 증액을 제안드립니다.`);
     if (!detailLoading && wasteAds.length) L.push(`낭비 의심 광고 ${wasteAds.length}건은 소재·랜딩 점검 대상입니다.`);
     const bestWd = byWeekday.slice().sort((a, b) => roasOf(b.m) - roasOf(a.m))[0];
     if (bestWd && byWeekday.length > 2) L.push(`요일 중에는 ${bestWd.label} 효율이 좋아 해당 요일 노출 강화를 검토합니다.`);
     return L.join('\n');
-  }, [thisRows, cur, prev, byType, topKw, wasteKw, wasteAds, byWeekday, P.label, cmpOk, detailLoading]);
+  }, [thisRows, cur, prev, byType, topKw, actionKw, gemKw, wasteAds, byWeekday, P.label, cmpOk, detailLoading]);
   const [commentEdited, setCommentEdited] = useState(false);
   useEffect(() => { if (!commentEdited) setComment(autoComment); }, [autoComment, commentEdited]);
 
@@ -630,6 +671,13 @@ export default function Report({ currentUser, allowedBrands }) {
     if (byWeekday.length) xAddTable(wb, '요일별', ['요일', ...XHEAD], [...byWeekday.map(w => [w.label, ...xr(w.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
     if (byType.length) xAddTable(wb, '광고유형별', ['광고유형', ...XHEAD], [...byType.map(t2 => [t2.type, ...xr(t2.m)]), ['전체', ...xr(cur)]], XMETA, { totalLast: true });
     if (topAds.length) xAddTable(wb, '상위광고', ['광고', '유형', ...XHEAD], topAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '매출 기준 상위' });
+    if (channel === 'search' && kwAgg.length) {
+      xAddTable(wb, '키워드-매출TOP10', ['키워드', ...XHEAD], topKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: kwHead });
+      xAddTable(wb, '키워드-광고비TOP10', ['키워드', ...XHEAD], costKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '예산이 어디로 갔나' });
+      if (roasKw.length) xAddTable(wb, '키워드-효율TOP10', ['키워드', ...XHEAD], roasKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: `클릭 ${KW_MIN_CLICKS}회 이상만 — 재현 가능성 높은 키워드` });
+      if (actionKw.length) xAddTable(wb, '키워드-조치대상', ['키워드', ...XHEAD], actionKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '전환 0 또는 ROAS 100% 미만' });
+      if (gemKw.length) xAddTable(wb, '키워드-숨은보석', ['키워드', ...XHEAD], gemKw.map(k => [k.keyword, ...xr(k.m)]), XMETA, { sub: '적게 쓰고 잘 번 키워드 — 증액 후보' });
+    }
     if (wasteAds.length) xAddTable(wb, '낭비의심광고', ['광고', '유형', ...XHEAD], wasteAds.map(a => [a.label, a.type, ...xr(a.m)]), XMETA, { labelCols: 2, sub: '비용 발생·전환 0' });
     return wb;
   };
@@ -898,6 +946,44 @@ export default function Report({ currentUser, allowedBrands }) {
             <MetricTable head={['광고', '유형', ...STD_HEAD]}
               rows={topAds.map(a => ({ label: a.label, cells: [{ v: a.type, color: R.sub }, ...stdCells(a.m)] }))} />}
           </Section>
+
+          {/* 키워드 요약 — 전 키워드는 실을 수 없어 관점별 TOP10으로 (검색광고만) */}
+          {channel === 'search' && kwAgg.length > 0 && (
+            <Section title="키워드 요약" sub={kwHead}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.pink, marginBottom: 6 }}>① 매출 기여 TOP 10 — 어디서 돈을 벌었나</div>
+                  <MetricTable head={['키워드', ...STD_HEAD]} rows={topKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: R.warn, marginBottom: 6 }}>② 광고비 TOP 10 — 예산이 어디로 갔나</div>
+                  <MetricTable head={['키워드', ...STD_HEAD, '비중']}
+                    rows={costKw.map(k => ({ label: k.keyword, cells: [...stdCells(k.m), { v: (kwTotal.cost > 0 ? k.m.cost / kwTotal.cost * 100 : 0).toFixed(1) + '%', color: R.sub }] }))} />
+                </div>
+                {roasKw.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: R.ok, marginBottom: 6 }}>③ 효율 TOP 10 — 클릭 {KW_MIN_CLICKS}회 이상만</div>
+                    <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>클릭이 적어 우연히 효율이 높게 잡힌 키워드는 제외했습니다. 다음 기간에도 재현될 가능성이 높은 키워드입니다.</div>
+                    <MetricTable head={['키워드', ...STD_HEAD]} rows={roasKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
+                  </div>
+                )}
+                {actionKw.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: R.no, marginBottom: 6 }}>④ 조치 대상 — 전환 0 또는 ROAS 100% 미만</div>
+                    <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>비용은 나갔지만 본전을 넘기지 못한 키워드입니다. 입찰 조정·제외 또는 랜딩 점검 대상입니다.</div>
+                    <MetricTable head={['키워드', ...STD_HEAD]} rows={actionKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
+                  </div>
+                )}
+                {gemKw.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: R.pur, marginBottom: 6 }}>⑤ 숨은 보석 — 적게 쓰고 잘 번 키워드 (증액 후보)</div>
+                    <div style={{ fontSize: 11, color: R.sub, marginBottom: 6 }}>광고비는 전체의 1% 미만인데 효율은 평균({roasStr(roasOf(kwTotal))})의 2배 이상입니다. 예산을 더 넣으면 매출이 늘어날 여지가 있습니다.</div>
+                    <MetricTable head={['키워드', ...STD_HEAD]} rows={gemKw.map(k => ({ label: k.keyword, cells: stdCells(k.m) }))} />
+                  </div>
+                )}
+              </div>
+            </Section>
+          )}
 
 
 
