@@ -725,6 +725,12 @@ export default function Report({ currentUser, allowedBrands }) {
         .rpt-title{break-after:avoid !important;page-break-after:avoid !important;}
         .rpt-tbl table tr{break-inside:avoid !important;page-break-inside:avoid !important;}
         .rpt-tbl table thead{display:table-header-group;}
+        /* 표가 종이 폭을 넘어 오른쪽 열이 잘리는 문제 (2026-08-04)
+           화면용 가로스크롤을 풀고, 글자·여백을 줄여 A4 폭에 전부 들어가게 한다 */
+        .rpt-tbl{overflow:visible !important;}
+        .rpt-tbl table{min-width:0 !important;width:100% !important;table-layout:auto !important;}
+        .rpt-tbl th,.rpt-tbl td{padding:4px 3px !important;font-size:9px !important;}
+        .rpt-tbl td:first-child,.rpt-tbl th:first-child{white-space:normal !important;word-break:break-word;}
       }`}</style>
 
       <div className="no-print" style={{ marginBottom: 16 }}>
