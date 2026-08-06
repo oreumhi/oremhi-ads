@@ -87,17 +87,17 @@ export default function Questions({ currentUser, allowedBrands }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
         <h2 style={{ margin: 0 }}>🙋 AI 질문</h2>
-        <span style={{ fontSize: 12, color: C.txd }}>Y/N만 눌러주시면 됩니다</span>
-        {msg && <span style={{ fontSize: 12, color: msg.includes('실패') ? '#f87171' : '#4ade80' }}>{msg}</span>}
+        <span style={{ fontSize: 14, color: C.txd }}>Y/N만 눌러주시면 됩니다</span>
+        {msg && <span style={{ fontSize: 14, fontWeight: 600, color: msg.includes('실패') ? '#f87171' : '#4ade80' }}>{msg}</span>}
       </div>
-      <div style={{ fontSize: 11, color: C.txm, marginBottom: 14, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ fontSize: 13, color: C.txm, marginBottom: 16, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         {[['open', `질문 ${open.length}`], ['todo', `실행 대기 ${todo.length}`], ['done', `완료 ${done.length}`]].map(([k, lb]) => (
           <button key={k} onClick={() => setShowDone(k)} style={{
             background: (showDone === k || (!showDone && k === 'open')) ? C.ac + '22' : 'none',
             border: `1px solid ${(showDone === k || (!showDone && k === 'open')) ? C.ac : C.bd}`,
             borderRadius: 6, padding: '3px 10px',
             color: (showDone === k || (!showDone && k === 'open')) ? C.ac : C.txd,
-            cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>{lb}</button>
+            cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>{lb}</button>
         ))}
         <span>{doc.generated_at ? `· 생성 ${String(doc.generated_at).slice(0, 10)}` : ''}{brands.length > 0 && <> · {brands.join(' · ')}</>}</span>
       </div>
@@ -113,42 +113,42 @@ export default function Questions({ currentUser, allowedBrands }) {
       {list.map(q => {
         const badge = TYPE_BADGE[q.qtype] || { bg: C.ac + '22', fg: C.ac };
         return (
-          <div key={q.id} style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: '12px 14px', marginBottom: 8 }}>
+          <div key={q.id} style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 12, padding: '16px 18px', marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-              <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 10, background: badge.bg, color: badge.fg, fontWeight: 600 }}>{q.qtype}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: C.tx }}>{q.brand}</span>
-              <span style={{ fontSize: 11, color: C.txd }}>{q.media} · {q.campaign} · {q.adgroup}</span>
+              <span style={{ fontSize: 12, padding: '3px 9px', borderRadius: 10, background: badge.bg, color: badge.fg, fontWeight: 700 }}>{q.qtype}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: C.tx }}>{q.brand}</span>
+              <span style={{ fontSize: 13, color: C.txd }}>{q.media} · {q.campaign} · {q.adgroup}</span>
             </div>
-            <div style={{ fontSize: 13, color: C.tx, marginBottom: 4 }}>{q.q}</div>
+            <div style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.5, color: C.tx, marginBottom: 6 }}>{q.q}</div>
             {q.metrics && (
-              <div style={{ fontSize: 11, color: C.txd, marginBottom: 8 }}>{q.metrics}</div>
+              <div style={{ fontSize: 14, lineHeight: 1.65, color: C.txd, marginBottom: 10 }}>{q.metrics}</div>
             )}
             {!q.answer ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button disabled={saving} onClick={() => answer(q.id, 'Y')}
-                  style={{ padding: '7px 26px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>Y</button>
+                  style={{ padding: '10px 34px', borderRadius: 9, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 800, fontSize: 18, cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>Y</button>
                 <button disabled={saving} onClick={() => answer(q.id, 'N')}
-                  style={{ padding: '7px 26px', borderRadius: 8, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>N</button>
+                  style={{ padding: '10px 34px', borderRadius: 9, border: 'none', background: '#dc2626', color: '#fff', fontWeight: 800, fontSize: 18, cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>N</button>
                 <input placeholder="이유 (선택, 한 단어면 충분)" value={notes[q.id] || ''}
                   onChange={e => setNotes({ ...notes, [q.id]: e.target.value })}
-                  style={{ flex: 1, minWidth: 140, background: C.bg, border: `1px solid ${C.bd}`, borderRadius: 7, padding: '7px 10px', color: C.tx, fontSize: 12 }} />
+                  style={{ flex: 1, minWidth: 160, background: C.bg, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '10px 12px', color: C.tx, fontSize: 14 }} />
               </div>
             ) : (
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 12, color: C.txd }}>
-                  <b style={{ color: q.answer === 'Y' ? '#4ade80' : '#f87171', fontSize: 14 }}>{q.answer}</b>
+                <div style={{ fontSize: 14, color: C.txd }}>
+                  <b style={{ color: q.answer === 'Y' ? '#4ade80' : '#f87171', fontSize: 17 }}>{q.answer}</b>
                   {q.note && <> · {q.note}</>}
                   {q.answered_by && <> · {q.answered_by}</>}
                   {q.answered_at && <> · {String(q.answered_at).slice(5, 10)}</>}
                 </div>
                 {q.answer === 'Y' && !q.executed_at && (
                   <button disabled={saving} onClick={() => markDone(q.id)}
-                    style={{ padding: '5px 14px', borderRadius: 7, border: 'none', background: '#ea580c', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>
+                    style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#ea580c', color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', opacity: saving ? 0.5 : 1 }}>
                     광고시스템에 반영했습니다 ✓
                   </button>
                 )}
                 {q.executed_at && (
-                  <span style={{ fontSize: 11, color: '#4ade80' }}>
+                  <span style={{ fontSize: 13, color: '#4ade80' }}>
                     ✅ 실행됨 · {q.executed_by} · {String(q.executed_at).slice(5, 10)}
                   </span>
                 )}
