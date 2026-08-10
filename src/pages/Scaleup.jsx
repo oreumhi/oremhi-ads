@@ -143,7 +143,11 @@ export default function Scaleup({ allowedBrands }) {
                     <tr key={i}>
                       <td style={{ ...td, textAlign: 'left' }}>
                         <div style={{ fontWeight: 600 }}>{r.keyword}</div>
-                        <div style={{ fontSize: 10.5, color: C.txm, marginTop: 2 }}>{r.campaign} · {r.adgroup}</div>
+                        <div style={{ fontSize: 11.5, color: C.txm, marginTop: 3, lineHeight: 1.5 }}>
+                          <span style={{ color: C.txd }}>캠페인명 :</span> {r.campaign}
+                          <br />
+                          <span style={{ color: C.txd }}>그룹명 :</span> {r.adgroup}
+                        </div>
                       </td>
                       <td style={{ ...td, textAlign: 'left' }}><WeekBars weekly={r.weekly} /></td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 700, color: C.ok }}>{r.weeks_sold} / {WEEKS}</td>
