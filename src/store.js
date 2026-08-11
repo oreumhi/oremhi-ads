@@ -708,3 +708,157 @@ export const fetchReportKeyword = (ownerId, f, t) => fetchDimTable('report_keywo
 export const fetchReportMedia = (ownerId, f, t) => fetchDimTable('report_media', ownerId, f, t);
 export const fetchReportHour = (ownerId, f, t) => fetchDimTable('report_hour', ownerId, f, t);
 export const fetchReportDemo = (ownerId, f, t) => fetchDimTable('report_demo', ownerId, f, t);
+
+// ═══════════════════════════════════════════════
+// 브랜드 통합 관리 (2026-08-11 대표님 지시)
+//   설정에서 브랜드를 등록하면: 명부(brand_registry.json) + 수집 계정 +
+//   담당 배정 + 목표 + 카톡방까지 한 번에. 다음날 새벽 수집부터 자동 매핑.
+//   삭제하면: 모든 화면·수집·담당에서 제거. 광고비 원본(ad_data)은 보관.
+// ═══════════════════════════════════════════════
+
+const REGISTRY_PATH = 'config/brand_registry.json';
+
+export async function fetchBrandRegistry() {
+  if (!sb) return { brands: [] };
+  const { data } = sb.storage.from('attachments').getPublicUrl(REGISTRY_PATH);
+  try {
+    const r = await fetch(data.publicUrl + '?t=' + Date.now());
+    if (!r.ok) return { brands: [] };
+    return await r.json();
+  } catch { return { brands: [] }; }
+}
+
+export async function saveBrandRegistry(doc) {
+  if (!sb) return false;
+  const next = { ...doc, updated_at: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(next, null, 1)], { type: 'application/json' });
+  try { await sb.storage.from('attachments').remove([REGISTRY_PATH]); } catch { /* ignore */ }
+  const { error } = await sb.storage.from('attachments').upload(REGISTRY_PATH, blob, { contentType: 'application/json', upsert: true });
+  if (error) { console.error('[브랜드명부] 저장 실패:', error.message); return false; }
+  return true;
+}
+
+// 브랜드 등록 — 필요한 모든 곳에 한 번에 반영
+//   info: { brand, accounts:[{name, account_id, source}], staff(이름), targetRoas, dailyBudget, kakaoRoom, storeUrl }
+export async function registerBrand(info) {
+  if (!sb) return { ok: false, msg: '클라우드 연결이 없습니다' };
+  const brand = (info.brand || '').trim();
+  if (!brand) return { ok: false, msg: '브랜드명을 입력하세요' };
+  const accounts = (info.accounts || []).filter(a => (a.name || '').trim() && String(a.account_id || '').trim());
+  if (!accounts.length) return { ok: false, msg: '네이버 계정을 1개 이상 입력하세요' };
+  if (!(info.staff || '').trim()) return { ok: false, msg: '담당 직원을 선택하세요' };
+  const log = [];
+
+  // 1) 명부 갱신 (같은 이름 있으면 계정 병합)
+  const reg = await fetchBrandRegistry();
+  const brands = reg.brands || [];
+  let entry = brands.find(b => b.brand === brand);
+  if (!entry) {
+    entry = { brand, accounts: [], staff: '', target_roas: null, daily_budget: null,
+      kakao_room: '', store_url: '', note: '', active: true,
+      created_at: new Date().toISOString().slice(0, 10) };
+    brands.push(entry);
+    log.push('명부에 새 브랜드 등록');
+  } else { log.push('기존 브랜드에 정보 병합'); }
+  accounts.forEach(a => {
+    if (!entry.accounts.some(x => String(x.account_id) === String(a.account_id))) {
+      entry.accounts.push({ name: a.name.trim(), account_id: String(a.account_id).trim(), source: a.source || 'search' });
+    }
+  });
+  entry.staff = info.staff.trim();
+  if (info.targetRoas) entry.target_roas = +info.targetRoas || null;
+  if (info.dailyBudget) entry.daily_budget = +info.dailyBudget || null;
+  if (info.kakaoRoom) entry.kakao_room = info.kakaoRoom.trim();
+  if (info.storeUrl) entry.store_url = info.storeUrl.trim();
+  entry.active = true;
+  if (!await saveBrandRegistry({ ...reg, brands })) return { ok: false, msg: '명부 저장 실패 — 다시 시도하세요' };
+
+  // 2) 수집 계정 등록 (다음날 새벽부터 수집)
+  for (const a of accounts) {
+    const { data: exist } = await sb.from('collector_advertisers').select('id').eq('account_id', String(a.account_id)).limit(1);
+    if (exist && exist.length) {
+      await sb.from('collector_advertisers').update({ active: true }).eq('id', exist[0].id);
+      log.push(`계정 ${a.name}: 이미 수집 중 (활성 확인)`);
+    } else {
+      await sb.from('collector_advertisers').insert({
+        id: 'adv_' + uid(), name: a.name.trim(), account_id: String(a.account_id).trim(),
+        source: a.source || 'search', owner_name: '오름히', active: true });
+      log.push(`계정 ${a.name}: 수집 목록에 추가`);
+    }
+  }
+
+  // 3) 담당 직원 배정
+  const { data: users } = await sb.from('users').select('id,name,role,assigned_brands');
+  const staffUser = (users || []).find(u => u.name === info.staff.trim());
+  if (staffUser) {
+    let bs = []; try { bs = JSON.parse(staffUser.assigned_brands || '[]'); } catch { /* ignore */ }
+    if (!bs.includes(brand)) {
+      bs.push(brand);
+      await sb.from('users').update({ assigned_brands: JSON.stringify(bs) }).eq('id', staffUser.id);
+      log.push(`담당 배정: ${info.staff}`);
+    }
+  }
+
+  // 4) 목표 (있으면)
+  if (info.targetRoas || info.dailyBudget) {
+    await sb.from('brand_targets').upsert({ brand,
+      target_roas: +info.targetRoas || null, daily_budget: +info.dailyBudget || null,
+      updated_by: '브랜드등록', updated_at: new Date().toISOString() });
+    log.push('목표 저장');
+  }
+
+  // 5) 카톡방 (있으면)
+  if (info.kakaoRoom && staffUser) {
+    await sb.from('chat_room_owner').upsert({ room_name: info.kakaoRoom.trim(),
+      owner_id: staffUser.id, staff_name: staffUser.name, client_name: brand,
+      active: true, updated_at: new Date().toISOString() }, { onConflict: 'room_name' });
+    log.push('대화분석 카톡방 연결');
+  }
+
+  // 6) 담당 일괄 연동 (순위·후기·대화 담당 맞춤)
+  try { await syncStaffAssignments(); log.push('담당 일괄 연동 실행'); } catch { /* ignore */ }
+  return { ok: true, msg: log.join(' · ') };
+}
+
+// 브랜드 삭제 — 모든 화면·수집·담당에서 제거. 광고비 원본(ad_data)은 보관.
+export async function deleteBrandEverywhere(brand) {
+  if (!sb || !brand) return { ok: false, msg: '' };
+  const done = [];
+  const reg = await fetchBrandRegistry();
+  const entry = (reg.brands || []).find(b => b.brand === brand);
+
+  // 1) 수집 중지 — 이 브랜드만 쓰는 계정만 끈다 (벌크 계정 보호)
+  if (entry) {
+    const otherAccounts = new Set();
+    (reg.brands || []).forEach(b => { if (b.brand !== brand && b.active !== false) (b.accounts || []).forEach(a => otherAccounts.add(String(a.account_id))); });
+    for (const a of (entry.accounts || [])) {
+      if (!otherAccounts.has(String(a.account_id))) {
+        await sb.from('collector_advertisers').update({ active: false }).eq('account_id', String(a.account_id));
+        done.push(`수집 중지: ${a.name}`);
+      } else done.push(`계정 ${a.name}: 다른 브랜드가 사용 중 — 수집 유지`);
+    }
+  }
+  // 2) 명부에서 제거
+  if (entry) { reg.brands = reg.brands.filter(b => b.brand !== brand); await saveBrandRegistry(reg); done.push('명부에서 제거'); }
+  // 3) 매핑 삭제 → 홈·성과·리포트 등 모든 화면에서 사라짐 (광고비 원본은 보관)
+  await sb.from('mappings').delete().eq('brand', brand); done.push('매핑 삭제');
+  // 4) 담당 배정 제거 (전 직원)
+  const { data: users } = await sb.from('users').select('id,name,assigned_brands');
+  for (const u of (users || [])) {
+    let bs = []; try { bs = JSON.parse(u.assigned_brands || '[]'); } catch { /* ignore */ }
+    if (bs.includes(brand)) {
+      await sb.from('users').update({ assigned_brands: JSON.stringify(bs.filter(x => x !== brand)) }).eq('id', u.id);
+      done.push(`담당 해제: ${u.name}`);
+    }
+  }
+  // 5) 목표·순위·후기·공유링크·카톡방
+  await sb.from('brand_targets').delete().eq('brand', brand);
+  await sb.from('rank_products').delete().eq('brand', brand);
+  await sb.from('review_store_map').delete().eq('brand', brand);
+  await sb.from('share_links').delete().eq('brand', brand);
+  await sb.from('chat_room_owner').update({ active: false, updated_at: new Date().toISOString() }).eq('client_name', brand);
+  done.push('목표·순위·후기·공유링크·카톡방 정리');
+  // 6) 재집계 → ad_daily에서 브랜드 소멸
+  notifyAggChanged();
+  return { ok: true, msg: done.join(' · ') };
+}
