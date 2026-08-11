@@ -14,6 +14,7 @@ import { C } from '../config';
 import { fmt, hashPin, uid } from '../utils';
 import { fetchUsers, createUser, deleteUser, updateUser, fetchShareLinks, createShareLink, deleteShareLink, countAdData, syncStaffAssignments } from '../store';
 import BrandTargets from '../components/BrandTargets';
+import BrandManager from '../components/BrandManager';
 
 export default function Settings({ data, clearAdData, currentUser, isAdmin, allowedBrands }) {
   const [msg, setMsg] = useState('');
@@ -178,6 +179,9 @@ export default function Settings({ data, clearAdData, currentUser, isAdmin, allo
           <div style={{ fontWeight: 600, color: msg.includes('✅') ? C.ok : C.no, fontSize: 13 }}>{msg}</div>
         </div>
       )}
+
+      {/* ═══ 브랜드 관리 — 등록/삭제 한 곳에서 (관리자 전용) ═══ */}
+      {isAdmin && <BrandManager users={users} onChanged={() => fetchUsers().then(setUsers)} />}
 
       {/* ═══ 브랜드 목표 관리 (담당자 기재 — 직원도 자기 담당 브랜드 입력 가능) ═══ */}
       <BrandTargets
