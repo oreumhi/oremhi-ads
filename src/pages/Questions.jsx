@@ -12,6 +12,19 @@ import { sb } from '../store';
 
 const PATH = 'ai/questions.json';
 
+// 근거 수치를 읽기 쉬운 칩으로 나눈다 — 괄호 안의 '·'(예: 212클릭·4전환)는 자르지 않음
+function splitMetrics(t) {
+  const out = []; let cur = '', depth = 0;
+  for (const ch of String(t || '')) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === '·' && depth === 0) { if (cur.trim()) out.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 async function loadQuestions() {
   if (!sb) return null;
   const { data } = sb.storage.from('attachments').getPublicUrl(PATH);
@@ -121,7 +134,14 @@ export default function Questions({ currentUser, allowedBrands }) {
             </div>
             <div style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.5, color: C.tx, marginBottom: 6 }}>{q.q}</div>
             {q.metrics && (
-              <div style={{ fontSize: 14, lineHeight: 1.65, color: C.txd, marginBottom: 10 }}>{q.metrics}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {splitMetrics(q.metrics).map((seg, i) => (
+                  <span key={i} style={{
+                    fontSize: 13.5, lineHeight: 1.5, color: C.tx, background: C.bg,
+                    border: `1px solid ${C.bd}`, borderRadius: 8, padding: '5px 11px',
+                  }}>{seg}</span>
+                ))}
+              </div>
             )}
             {!q.answer ? (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
