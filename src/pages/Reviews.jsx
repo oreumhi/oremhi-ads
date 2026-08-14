@@ -38,10 +38,12 @@ async function copyText(text) {
 
 function buildStoreText(storeName, items, dateStr, at, nameOf, resultOf) {
   const lines = [];
-  let lowTotal = 0;
-  items.forEach(p => { const r = resultOf(p); if (r) lowTotal += (r.low_count || 0); });
+  let lowTotal = 0, failCnt = 0;
+  items.forEach(p => { const r = resultOf(p); if (r) { lowTotal += (r.low_count || 0); if (!r.ok) failCnt++; } });
   lines.push(`[후기체크·${storeName}] ${dateStr}${at ? ' ' + at : ''}`);
-  lines.push(lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음');
+  // 점검 자체를 못 한 건이 있으면 '이상 없음'으로 단정하지 않는다 (2026-08-14)
+  lines.push(lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건`
+    : failCnt > 0 ? `❗ 점검 실패 ${failCnt}건 — 확인 필요` : '✅ 모두 이상 없음');
   for (const p of items) {
     const nm = nameOf(p); const r = resultOf(p);
     if (!r) { lines.push(`· ${nm} (점검 전)`); continue; }
@@ -95,7 +97,9 @@ function ProductRow({ p, name, result, canEdit, onRename, onDelete }) {
           {!r ? (
             <span style={{ fontSize: 12, color: C.txm }}>· 점검 전 (내일부터 점검)</span>
           ) : !r.ok ? (
-            <span style={{ fontSize: 12, color: C.txm }}>❓ {r.note || '확인 필요'}</span>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: /로그인/.test(r.note || '') ? '#f59f3b' : C.txm }}>
+              {/로그인/.test(r.note || '') ? '❗ 네이버 로그인 만료 — 점검 못 함' : `❓ ${r.note || '확인 필요'}`}
+            </span>
           ) : lows.length > 0 ? (
             <span style={{ fontSize: 12.5, color: C.no }}>
               ⚠️ {lows.map(([pos, rat], i) => <span key={i}>{i > 0 ? ', ' : ''}{pos}번째 <Star n={rat} /></span>)}
@@ -323,7 +327,12 @@ export default function Reviews({ currentUser }) {
                 <EditableName value={storeLabel(store)} canEdit={canEdit} onSave={(n) => renameStore(store, n)} style={{ fontSize: 15, fontWeight: 800, color: C.ac }} />
                 {at && <span style={{ fontSize: 11, color: C.txm }}>{date} {at}</span>}
                 {anyResult
-                  ? <span style={{ fontSize: 12.5, color: lowTotal > 0 ? C.no : C.ok, fontWeight: 600 }}>{lowTotal > 0 ? `⚠️ 저평점 ${lowTotal}건` : '✅ 모두 이상 없음'}</span>
+                  ? (() => {
+                      const failCnt = items.reduce((n, p) => { const r = resultOf(p); return n + (r && !r.ok ? 1 : 0); }, 0);
+                      if (lowTotal > 0) return <span style={{ fontSize: 12.5, color: C.no, fontWeight: 600 }}>⚠️ 저평점 {lowTotal}건</span>;
+                      if (failCnt > 0) return <span style={{ fontSize: 12.5, color: '#f59f3b', fontWeight: 700 }}>❗ 점검 실패 {failCnt}건 — 확인 필요</span>;
+                      return <span style={{ fontSize: 12.5, color: C.ok, fontWeight: 600 }}>✅ 모두 이상 없음</span>;
+                    })()
                   : <span style={{ fontSize: 12, color: C.txm }}>이 날짜 점검 결과 없음</span>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
