@@ -147,8 +147,12 @@ async function uploadFiles(files) {
 
 // ══════════════ 일일보고: 내 보고 작성 (직원+대표 공용) ══════════════
 // 여러 줄(줄바꿈)로 저장된 '오늘 한 일'을 항목 배열로 — 최소 minLen칸 유지
+// 항목 '안' 줄바꿈(Shift+Enter)은 U+2028로 저장한다 — 항목 구분자('\n')와 충돌하지 않게 (2026-08-26 대표님 요청)
+const SOFT_BR = '\u2028';
+const toDisplay = s => (s || '').split(SOFT_BR).join('\n');   // 저장값 → 화면(textarea)용
+const toStore = s => (s || '').split('\n').join(SOFT_BR);     // 화면값 → 저장용
 const splitItems = (s, minLen = 3) => {
-  const arr = (s || '').split('\n').map(x => x.replace(/^\s*[-·•\d.]+\s*/, '').trim());
+  const arr = (s || '').split('\n').map(x => toDisplay(x).replace(/^\s*[-·•\d.]+\s*/, '').trim());
   while (arr.length < minLen) arr.push('');
   return arr.length ? arr : Array(minLen).fill('');
 };
@@ -178,7 +182,7 @@ function MyDaily({ currentUser, onSaved }) {
   const submitted = history.some(r => r.report_date === td);
 
   const save = async () => {
-    const done = doneItems.map(x => x.trim()).filter(Boolean).join('\n');
+    const done = doneItems.map(x => toStore(x.trim())).filter(Boolean).join('\n');
     if (!done && !form.tomorrow.trim()) { alert('오늘 한 일 또는 내일 최우선 중 하나는 적어주세요.'); return; }
     setSaving(true);
     const newAtts = await uploadFiles(files);
@@ -195,7 +199,7 @@ function MyDaily({ currentUser, onSaved }) {
   return (
     <div>
       <Section title={`오늘 보고 쓰기 — ${kdw(td)}`}
-        sub="3줄이면 충분합니다. 몇 시에 일했는지가 아니라 무엇이 진행됐는지를 공유하는 자리입니다."
+        sub="3줄이면 충분합니다. 몇 시에 일했는지가 아니라 무엇이 진행됐는지를 공유하는 자리입니다. (Shift+Enter = 칸 안 줄바꿈)"
         right={submitted ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출 완료 · 수정 가능</span>
           : [0, 6].includes(new Date(td + 'T00:00:00').getDay()) ? <span style={badge('rgba(136,144,166,0.15)', C.txd)}>주말 — 제출은 선택</span>
           : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}>
@@ -206,13 +210,15 @@ function MyDaily({ currentUser, onSaved }) {
               {doneItems.map((v, i) => (
                 <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ fontSize: 12, color: C.txd, width: 18, textAlign: 'right', flexShrink: 0 }}>{i + 1}.</span>
-                  <input
-                    style={{ flex: 1, background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '9px 11px', color: C.tx, fontSize: 13, outline: 'none' }}
+                  <textarea
+                    style={{ flex: 1, background: C.sf3, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '9px 11px', color: C.tx, fontSize: 13, outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: 1.5, overflow: 'hidden' }}
+                    rows={Math.max(1, v.split('\n').length)}
                     value={v}
                     placeholder={i === 0 ? '예) 모그라미 여름 프로모션 소재 3종 교체' : i === 1 ? '예) ROAS 낮은 키워드 12개 제외' : '한 가지씩 적어주세요'}
                     onChange={e => setDoneItems(items => items.map((x, j) => j === i ? e.target.value : x))}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') { e.preventDefault(); if (i === doneItems.length - 1) setDoneItems(items => [...items, '']); }
+                      // Enter = 다음 칸 추가 · Shift+Enter = 칸 안에서 줄바꿈 (2026-08-26)
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (i === doneItems.length - 1) setDoneItems(items => [...items, '']); }
                     }} />
                   {doneItems.length > 1 && (
                     <button title="이 줄 삭제" onClick={() => setDoneItems(items => items.filter((_, j) => j !== i))}
@@ -245,12 +251,12 @@ function MyDaily({ currentUser, onSaved }) {
             <div key={r.id} style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px' }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.cyan, marginBottom: 4 }}>{kdw(r.report_date)}</div>
               {r.done && (r.done.split('\n').filter(x => x.trim()).map((line, i) => (
-                <div key={i} style={{ fontSize: 13, marginBottom: 2 }}>✅ {line.trim()}</div>
+                <div key={i} style={{ fontSize: 13, marginBottom: 2, whiteSpace: 'pre-wrap' }}>✅ {toDisplay(line.trim())}</div>
               )))}
-              {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 2 }}>▶ 내일: {r.tomorrow}</div>}
-              {r.blocker && <div style={{ fontSize: 13, color: C.warn, marginBottom: 2 }}>⚠ {r.blocker}</div>}
+              {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 2, whiteSpace: 'pre-wrap' }}>▶ 내일: {r.tomorrow}</div>}
+              {r.blocker && <div style={{ fontSize: 13, color: C.warn, marginBottom: 2, whiteSpace: 'pre-wrap' }}>⚠ {r.blocker}</div>}
               <AttachThumbs atts={r.attachments} />
-              {r.ceo_comment && <div style={{ fontSize: 13, color: C.yel, background: 'rgba(240,199,70,0.08)', borderRadius: 8, padding: '6px 10px', marginTop: 6 }}>💬 대표: {r.ceo_comment}</div>}
+              {r.ceo_comment && <div style={{ fontSize: 13, color: C.yel, background: 'rgba(240,199,70,0.08)', borderRadius: 8, padding: '6px 10px', marginTop: 6, whiteSpace: 'pre-wrap' }}>💬 대표: {r.ceo_comment}</div>}
             </div>
           ))}
       </Section>
@@ -308,19 +314,21 @@ function DailyAdmin({ users, currentUser }) {
                 {r ? (
                   <div>
                     {r.done && (r.done.split('\n').filter(x => x.trim()).map((line, i) => (
-                      <div key={i} style={{ fontSize: 13, marginBottom: 4 }}>✅ {line.trim()}</div>
+                      <div key={i} style={{ fontSize: 13, marginBottom: 4, whiteSpace: 'pre-wrap' }}>✅ {toDisplay(line.trim())}</div>
                     )))}
-                    {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 4 }}>▶ 내일: {r.tomorrow}</div>}
-                    {r.blocker ? <div style={{ fontSize: 13, color: C.warn, marginBottom: 4 }}>⚠ {r.blocker}</div>
+                    {r.tomorrow && <div style={{ fontSize: 13, color: C.txd, marginBottom: 4, whiteSpace: 'pre-wrap' }}>▶ 내일: {r.tomorrow}</div>}
+                    {r.blocker ? <div style={{ fontSize: 13, color: C.warn, marginBottom: 4, whiteSpace: 'pre-wrap' }}>⚠ {r.blocker}</div>
                       : <div style={{ fontSize: 12, color: C.txm, marginBottom: 4 }}>막힌 것 없음</div>}
                     <AttachThumbs atts={r.attachments} />
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                      <input style={{ ...inp, fontSize: 12.5 }} placeholder="한 줄 코멘트 (직원에게 표시)" value={comments[r.id] || ''}
+                      <textarea style={{ ...inp, fontSize: 12.5, resize: 'none', fontFamily: 'inherit', lineHeight: 1.5, overflow: 'hidden' }}
+                        rows={Math.max(1, (comments[r.id] || '').split('\n').length)}
+                        placeholder="코멘트 (직원에게 표시 · Shift+Enter 줄바꿈)" value={comments[r.id] || ''}
                         onChange={e => setComments(c => ({ ...c, [r.id]: e.target.value }))}
-                        onKeyDown={e => { if (e.key === 'Enter') saveComment(r.id); }} />
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveComment(r.id); } }} />
                       <button style={btn} onClick={() => saveComment(r.id)}>💬</button>
                     </div>
-                    {r.ceo_comment && <div style={{ fontSize: 12, color: C.yel, marginTop: 6 }}>현재 코멘트: {r.ceo_comment}</div>}
+                    {r.ceo_comment && <div style={{ fontSize: 12, color: C.yel, marginTop: 6, whiteSpace: 'pre-wrap' }}>현재 코멘트: {r.ceo_comment}</div>}
                   </div>
                 ) : <div style={{ fontSize: 13, color: C.txm }}>이 날짜의 보고가 없습니다.</div>}
               </div>
@@ -866,7 +874,7 @@ function TeamCalendar({ users, currentUser, isAdmin }) {
             {dayReports.map(r => (
               <div key={r.id} style={{ fontSize: 12.5, marginBottom: 6 }}>
                 <b style={{ color: C.cyan }}>{r.staff_name}</b>
-                {r.done && (() => { const items = r.done.split('\n').filter(x => x.trim()); const first = items[0].trim().slice(0, 80); return <span style={{ color: C.tx }}> — {first}{items.length > 1 ? ` 외 ${items.length - 1}건` : ''}</span>; })()}
+                {r.done && (() => { const items = r.done.split('\n').filter(x => x.trim()); const first = items[0].trim().split(SOFT_BR).join(' ').slice(0, 80); return <span style={{ color: C.tx }}> — {first}{items.length > 1 ? ` 외 ${items.length - 1}건` : ''}</span>; })()}
                 {r.blocker && <span style={{ color: C.warn }}> ⚠ {r.blocker.slice(0, 50)}</span>}
               </div>
             ))}
