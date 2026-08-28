@@ -164,22 +164,36 @@ function MyDaily({ currentUser, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
   const [files, setFiles] = useState([]);           // 새로 선택한 사진들
-  const [existingAtts, setExistingAtts] = useState([]);  // 오늘 보고에 이미 저장된 사진들
+  const [existingAtts, setExistingAtts] = useState([]);  // 보고에 이미 저장된 사진들
   const td = todayStr();
+  // 지난 보고 수정 — '내 최근 보고'의 [수정] 버튼으로 그 날짜를 불러온다 (2026-08-27 대표님 요청)
+  const [editDate, setEditDate] = useState(td);
+  const editing = editDate !== td;
 
   const load = useCallback(async () => {
     const list = await fetchMyReports(currentUser.id, 14);
     setHistory(list);
-    const todayR = list.find(r => r.report_date === td);
-    if (todayR) {
-      setForm({ done: todayR.done || '', tomorrow: todayR.tomorrow || '', blocker: todayR.blocker || '' });
-      setDoneItems(splitItems(todayR.done, 3));
-      setExistingAtts(todayR.attachments || []);
+    const cur = list.find(r => r.report_date === editDate);
+    if (cur) {
+      setForm({ done: cur.done || '', tomorrow: cur.tomorrow || '', blocker: cur.blocker || '' });
+      setDoneItems(splitItems(cur.done, 3));
+      setExistingAtts(cur.attachments || []);
+    } else {
+      setForm({ done: '', tomorrow: '', blocker: '' });
+      setDoneItems(['', '', '']);
+      setExistingAtts([]);
     }
-  }, [currentUser.id]);
+  }, [currentUser.id, editDate]);
   useEffect(() => { load(); }, [load]);
 
-  const submitted = history.some(r => r.report_date === td);
+  const submitted = history.some(r => r.report_date === editDate);
+
+  const startEdit = (d) => {
+    if (d === editDate) return;
+    setEditDate(d); setFiles([]); setSavedMsg('');
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* 구형 브라우저 */ }
+  };
+  const backToToday = () => { setEditDate(td); setFiles([]); setSavedMsg(''); };
 
   const save = async () => {
     const done = doneItems.map(x => toStore(x.trim())).filter(Boolean).join('\n');
@@ -187,7 +201,7 @@ function MyDaily({ currentUser, onSaved }) {
     setSaving(true);
     const newAtts = await uploadFiles(files);
     const atts = [...existingAtts, ...newAtts];
-    const r = await upsertDailyReport({ owner_id: currentUser.id, staff_name: currentUser.name, report_date: td, ...form, done, attachments: atts });
+    const r = await upsertDailyReport({ owner_id: currentUser.id, staff_name: currentUser.name, report_date: editDate, ...form, done, attachments: atts });
     setSaving(false);
     if (r.ok) {
       setFiles([]); setExistingAtts(atts);
@@ -198,9 +212,15 @@ function MyDaily({ currentUser, onSaved }) {
 
   return (
     <div>
-      <Section title={`오늘 보고 쓰기 — ${kdw(td)}`}
-        sub="3줄이면 충분합니다. 몇 시에 일했는지가 아니라 무엇이 진행됐는지를 공유하는 자리입니다. (Shift+Enter = 칸 안 줄바꿈)"
-        right={submitted ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출 완료 · 수정 가능</span>
+      <Section title={editing ? `지난 보고 수정 — ${kdw(editDate)}` : `오늘 보고 쓰기 — ${kdw(td)}`}
+        sub={editing ? '지난 날짜의 보고를 고치는 중입니다. 저장하면 그 날짜 보고가 덮어써집니다.'
+          : '3줄이면 충분합니다. 몇 시에 일했는지가 아니라 무엇이 진행됐는지를 공유하는 자리입니다. (Shift+Enter = 칸 안 줄바꿈)'}
+        right={editing ? (
+            <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              <span style={badge('rgba(240,199,70,0.18)', C.yel)}>{kdw(editDate)} 수정 중</span>
+              <button style={{ ...btn, padding: '4px 10px', fontSize: 12 }} onClick={backToToday}>오늘 보고로</button>
+            </span>)
+          : submitted ? <span style={badge('rgba(61,217,160,0.15)', C.ok)}>제출 완료 · 수정 가능</span>
           : [0, 6].includes(new Date(td + 'T00:00:00').getDay()) ? <span style={badge('rgba(136,144,166,0.15)', C.txd)}>주말 — 제출은 선택</span>
           : <span style={badge('rgba(240,112,112,0.15)', C.no)}>미제출</span>}>
         <div style={{ display: 'grid', gap: 10 }}>
@@ -240,16 +260,24 @@ function MyDaily({ currentUser, onSaved }) {
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <button style={btnAc} disabled={saving} onClick={save}>{saving ? '저장 중…' : submitted ? '수정 저장' : '제출하기'}</button>
+            {editing && <button style={btn} disabled={saving} onClick={backToToday}>취소 — 오늘 보고로 돌아가기</button>}
             {savedMsg && <span style={{ color: C.ok, fontSize: 13, fontWeight: 700 }}>{savedMsg}</span>}
           </div>
         </div>
       </Section>
 
-      <Section title="내 최근 보고" sub="대표 코멘트가 달리면 여기에 표시됩니다.">
+      <Section title="내 최근 보고" sub="대표 코멘트가 달리면 여기에 표시됩니다. [수정]을 누르면 그 날짜 보고를 다시 고칠 수 있습니다.">
         {history.length === 0 ? <div style={{ color: C.txd, fontSize: 13 }}>아직 보고가 없습니다. 오늘 첫 보고를 남겨보세요.</div> :
           history.map(r => (
-            <div key={r.id} style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px' }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.cyan, marginBottom: 4 }}>{kdw(r.report_date)}</div>
+            <div key={r.id} style={{ borderTop: `1px solid ${C.bd}`, padding: '10px 2px',
+              background: r.report_date === editDate && editing ? 'rgba(240,199,70,0.06)' : 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: C.cyan }}>{kdw(r.report_date)}</span>
+                {r.report_date === editDate && editing
+                  ? <span style={badge('rgba(240,199,70,0.18)', C.yel)}>위에서 수정 중</span>
+                  : <button style={{ ...btn, padding: '4px 12px', fontSize: 12 }}
+                      onClick={() => startEdit(r.report_date)}>수정</button>}
+              </div>
               {r.done && (r.done.split('\n').filter(x => x.trim()).map((line, i) => (
                 <div key={i} style={{ fontSize: 13, marginBottom: 2, whiteSpace: 'pre-wrap' }}>✅ {toDisplay(line.trim())}</div>
               )))}
