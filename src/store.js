@@ -7,7 +7,7 @@
 //   - 업로드/매핑 시 owner_id 자동 태깅
 // ============================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { uid, toLocalDateStr } from './utils';
 
@@ -21,23 +21,49 @@ export const sb = hasSB ? createClient(url, key) : null;
 
 // 병렬 페이지 로딩 (Supabase Max rows=5000과 일치)
 const PAGE_SIZE = 5000;
-async function fetchPagedParallel(makeQuery, wave = 6) {
+
+// ※ 2026-09-10 속도 개선 — 대시보드가 느려진 핵심 원인 세 가지를 여기서 잡습니다.
+//   ① 표를 하나 읽을 때마다 무조건 6개 요청을 한꺼번에 던졌습니다. 3줄짜리 표에도
+//      빈 요청 5개가 같이 나갔고, 홈 화면 한 번 여는 데 30개가 넘는 요청이 몰렸습니다.
+//      DB 접속 자리가 꽉 차서 서로를 기다리다 전부 느려졌습니다(같은 조회가 0.6초→7초).
+//      → 첫 장을 하나만 읽고, 더 있을 때만 나눠 읽습니다. 대부분 요청 1개로 끝납니다.
+//   ② 동시 요청을 6 → 3으로 낮춰 접속 자리를 남겨 둡니다.
+//   ③ 실패하면 곧바로 한 번만 다시 부르던 것을, 0.7초→1.4초→2.8초로 간격을 늘려
+//      3번까지 시도합니다. 몰릴 때 재시도가 부하를 더 키우던 문제를 막습니다.
+const MAX_WAVE = 3;
+
+async function runWithRetry(makeQuery, page) {
+  let last = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 700 * Math.pow(2, attempt - 1)));
+    last = await makeQuery(page, PAGE_SIZE);
+    if (!last || !last.error) return last;
+  }
+  return last;
+}
+
+async function fetchPagedParallel(makeQuery, wave = MAX_WAVE) {
   const all = [];
-  let page = 0;
+  // 1단계 — 첫 장만 읽는다. 웬만한 표는 여기서 끝난다(요청 1개).
+  const first = await runWithRetry(makeQuery, 0);
+  if (!first || first.error) {
+    if (first && first.error) console.error('[조회] 오류:', first.error.message);
+    return all;
+  }
+  if (!first.data || first.data.length === 0) return all;
+  all.push(...first.data);
+  if (first.data.length < PAGE_SIZE) return all;
+
+  // 2단계 — 더 있을 때만 나눠 읽는다.
+  let page = 1;
   for (;;) {
     const results = await Promise.all(
-      Array.from({ length: wave }, (_, i) => makeQuery(page + i, PAGE_SIZE))
+      Array.from({ length: wave }, (_, i) => runWithRetry(makeQuery, page + i))
     );
-    // 일시 오류(타임아웃 등)는 그 페이지만 잠시 후 1회 재시도 — 조용한 부분 유실 방지
-    for (let i = 0; i < results.length; i++) {
-      if (results[i] && results[i].error) {
-        await new Promise(r => setTimeout(r, 800));
-        results[i] = await makeQuery(page + i, PAGE_SIZE);
-      }
-    }
     page += wave;
     let done = false;
-    for (const { data, error } of results) {
+    for (const res of results) {
+      const { data, error } = res || {};
       if (error) { console.error('[병렬조회] 오류:', error.message); done = true; break; }
       if (!data || data.length === 0) { done = true; break; }
       all.push(...data);
@@ -46,6 +72,20 @@ async function fetchPagedParallel(makeQuery, wave = 6) {
     if (done) break;
   }
   return all;
+}
+
+// ─── 매핑 캐시 ───
+// ※ 2026-09-10: 매핑은 하루에 몇 번 바뀌지도 않는데, 화면을 열거나 기간을 바꿀 때마다
+//   2만 3천 건(약 6MB)을 매번 다시 받아 왔습니다. 한 번 받아 5분간 재사용하고,
+//   매핑을 추가·삭제하면 즉시 새로 받습니다(화면에 옛 매핑이 남지 않습니다).
+let _mapCache = null, _mapCacheAt = 0;
+const MAP_TTL_MS = 5 * 60 * 1000;
+export function invalidateMappingsCache() { _mapCache = null; _mapCacheAt = 0; }
+async function fetchMappingsCached() {
+  if (_mapCache && Date.now() - _mapCacheAt < MAP_TTL_MS) return _mapCache;
+  const rows = await fetchAll('mappings');
+  _mapCache = rows; _mapCacheAt = Date.now();
+  return rows;
 }
 
 async function fetchAll(table) {
@@ -342,7 +382,9 @@ async function fetchAdDataByRangeAndOwner(rangeDays, ownerId) {
 
 export function useStore(currentUser) {
   const [data, setData] = useState({ adData: [], mappings: [] });
-  const [loading, setLoading] = useState(true); // 초기 로딩만 (전체 화면 로딩)
+  // ※ 2026-09-10: 예전엔 앱을 켜자마자 true라서, 필요도 없는 데이터를 다 받을 때까지
+  //   화면 전체가 로딩으로 멈춰 있었습니다. 이제 실제로 받을 때만 켭니다.
+  const [loading, setLoading] = useState(false);
   const [rangeLoading, setRangeLoading] = useState(false); // 기간 변경 로딩 (작은 인디케이터)
   const [loadedRange, setLoadedRange] = useState(0); // 현재 로드된 범위 (일수)
 
@@ -363,7 +405,7 @@ export function useStore(currentUser) {
         // (수집 데이터는 관리자 소유라, 직원을 소유자 기준으로 격리하면 아무것도 안 보이는 문제가 있었음)
         [adData, mappings] = await Promise.all([
           fetchAdDataByRange(rangeDays),
-          fetchAll('mappings'),
+          fetchMappingsCached(),
         ]);
       } else {
         adData = [];
@@ -389,14 +431,28 @@ export function useStore(currentUser) {
     }
   }, [currentUser, loadDataInternal]);
 
-  // 초기 로드: currentUser가 설정된 후에만
+  // ※ 2026-09-10 속도 개선 — 대시보드가 느려진 가장 큰 원인
+  //   앱을 켜면 무조건 최근 7일 광고 원본(약 36,000행·15MB, 요청 8개)과
+  //   매핑 전체(23,755건·6MB, 요청 5개)를 먼저 받았고, 그동안 화면 전체가 멈춰 있었습니다.
+  //   그런데 첫 화면인 '홈'은 이 데이터를 하나도 쓰지 않습니다(홈은 서버 집계표를 따로 씁니다).
+  //   → 실제로 쓰는 화면(성과 보기·종합 요약·보고서 업로드·매핑 관리·설정)에 들어갈 때만 받습니다.
+  const askedRef = useRef(false);
+
   useEffect(() => {
     if (!currentUser) {
       setData({ adData: [], mappings: [] });
       setLoading(false);
+      askedRef.current = false;
       return;
     }
-    loadData(7);
+    askedRef.current = false;   // 사용자가 바뀌면 다시 받는다
+  }, [currentUser]);
+
+  // 데이터가 필요한 화면에서 호출 — 한 번만 받고, 이후에는 그대로 재사용
+  const ensureData = useCallback(async (rangeDays = 7) => {
+    if (!currentUser || askedRef.current) return;
+    askedRef.current = true;
+    await loadData(rangeDays);
   }, [currentUser, loadData]);
 
   // 기간 변경 시 호출 (Dashboard에서 호출)
@@ -520,7 +576,7 @@ export function useStore(currentUser) {
     await loadData(loadedRange || 7);
   }, [ownerId, loadData, loadedRange]);
 
-  return { data, loading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange };
+  return { data, loading, rangeLoading, ensureData, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange };
 }
 
 // ─── 하락 진단: 브랜드의 광고그룹별 합계 (서버 집계 — 수십 줄만 내려옴) ───
@@ -578,7 +634,7 @@ export async function fetchAdDataForReport(rangeDays, ownerId) {
   return ownerId ? fetchAdDataByRangeAndOwner(rangeDays, ownerId) : fetchAdDataByRange(rangeDays);
 }
 export async function fetchMappingsAll() {
-  return await fetchAll('mappings');
+  return await fetchMappingsCached();
 }
 
 // ═══════════════════════════════════════════
@@ -684,12 +740,18 @@ export async function syncStaffAssignments() {
 // 전체 데이터 정확한 건수 (설정 화면 표시용 — 행을 내려받지 않고 개수만 조회)
 export async function countAdData() {
   if (!sb) return 0;
-  const { count, error } = await sb.from('ad_data').select('id', { count: 'exact', head: true });
-  return error ? 0 : (count || 0);
+  // ※ 2026-09-10: 정확히 세려면 115만 행을 전부 훑어야 해서 10초가 넘게 걸리고,
+  //   그동안 대시보드 전체가 같이 멈췄습니다(설정 화면을 열 때마다 발생).
+  //   DB가 이미 갖고 있는 추정치를 씁니다 — 오차는 1% 안팎이고 즉시 응답합니다.
+  const { count, error } = await sb.from('ad_data').select('id', { count: 'planned', head: true });
+  if (!error && count) return count;
+  const r2 = await sb.from('ad_data').select('id', { count: 'estimated', head: true });
+  return r2.error ? 0 : (r2.count || 0);
 }
 
 // 데이터/매핑 변경 알림 → DB가 5분 내 자동 재집계 (즉시 반환, 실패해도 무해)
 export function notifyAggChanged() {
+  invalidateMappingsCache();   // 매핑이 바뀌었을 수 있으므로 캐시를 비운다 (2026-09-10)
   if (sb) { try { sb.rpc('mark_ad_daily_dirty').then(() => {}, () => {}); } catch { /* ignore */ } }
 }
 
@@ -841,7 +903,7 @@ export async function deleteBrandEverywhere(brand) {
   // 2) 명부에서 제거
   if (entry) { reg.brands = reg.brands.filter(b => b.brand !== brand); await saveBrandRegistry(reg); done.push('명부에서 제거'); }
   // 3) 매핑 삭제 → 홈·성과·리포트 등 모든 화면에서 사라짐 (광고비 원본은 보관)
-  await sb.from('mappings').delete().eq('brand', brand); done.push('매핑 삭제');
+  await sb.from('mappings').delete().eq('brand', brand); invalidateMappingsCache(); done.push('매핑 삭제');
   // 4) 담당 배정 제거 (전 직원)
   const { data: users } = await sb.from('users').select('id,name,assigned_brands');
   for (const u of (users || [])) {
