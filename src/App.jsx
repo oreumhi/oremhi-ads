@@ -18,6 +18,12 @@ import { hashPin, uid } from './utils';
 import { useStore, fetchUsers, createUser, authenticateUser, findShareLinkByCode, authenticateShareLink } from './store';
 import { Layout } from './components/Layout';
 
+// ※ 2026-09-10 속도 개선 — 광고 원본 데이터(최근 7일 36,000행 + 매핑 23,755건)를
+//   실제로 쓰는 화면 목록. 홈·대화 분석·후기·순위·리포트·팀 업무 등은 각자 필요한 것만
+//   따로 받으므로 이 데이터가 필요 없습니다. 예전엔 어느 화면을 열든 이걸 다 받느라
+//   앱 전체가 멈춰 있었습니다.
+const TABS_NEEDING_DATA = ['dashboard', 'overview', 'upload', 'mapping', 'settings'];
+
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import Overview from './pages/Overview';
@@ -187,7 +193,12 @@ export default function App() {
   // 현재 탭을 저장 → F5 새로고침해도 같은 화면 유지
   useEffect(() => { try { sessionStorage.setItem('oha_tab', tab); } catch { /* ignore */ } }, [tab]);
 
-  const { data, loading: dataLoading, rangeLoading, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange } = useStore(currentUser);
+  const { data, loading: dataLoading, rangeLoading, ensureData, uploadAdData, addMapping, removeMapping, removeBrand, clearAdData, deleteAdDataByKeys, changeRange, changeCustomRange } = useStore(currentUser);
+
+  // 광고 원본이 필요한 화면(또는 공유 대시보드)에 들어갈 때만 데이터를 받는다 (2026-09-10)
+  useEffect(() => {
+    if (mode === 'share_view' || TABS_NEEDING_DATA.includes(tab)) ensureData();
+  }, [tab, mode, ensureData]);
 
   // ─── 초기화: URL 체크 → 사용자 확인 ───
   useEffect(() => {
@@ -279,7 +290,9 @@ export default function App() {
   // ─── 렌더링 ───
 
   // 로딩
-  if (mode === 'loading' || dataLoading) return <Loading />;
+  if (mode === 'loading') return <Loading />;
+  // 광고 원본을 받는 중일 때는, 그것이 필요한 화면에서만 로딩 화면을 보여준다 (2026-09-10)
+  if (dataLoading && (mode === 'share_view' || TABS_NEEDING_DATA.includes(tab))) return <Loading />;
 
   // 관리자 초기 설정
   if (mode === 'setup') return <AdminSetup onComplete={handleSetupComplete} />;
