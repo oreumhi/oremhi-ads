@@ -750,9 +750,28 @@ export async function countAdData() {
 }
 
 // 데이터/매핑 변경 알림 → DB가 5분 내 자동 재집계 (즉시 반환, 실패해도 무해)
+// ※ 2026-09-10 — 대시보드가 멈추던 직접적 원인
+//   서버가 집계표(ad_daily·ad_weekly·ad_monthly)를 다시 만드는 동안 그 표들이 잠깁니다.
+//   잠긴 동안 대시보드의 집계표 조회는 전부 실패합니다(측정: 원본 표는 멀쩡한데 집계표 3개만 타임아웃).
+//   그런데 매핑을 하나 고칠 때마다 이 재집계를 불렀습니다 — 매핑 30건을 손보면 재집계 30번,
+//   그 시간 내내 화면이 멈췄습니다.
+//   → 뜸하다가 한 번 바뀌면 즉시, 연달아 바뀌면 마지막 변경 후 60초에 딱 한 번만 부릅니다.
+//     (원래도 '5분 내 반영'이 설계 의도라 결과는 같고, 잠기는 횟수만 크게 줄어듭니다)
+let _aggTimer = null, _aggLastSent = 0;
+function _sendAggNow() {
+  _aggLastSent = Date.now(); _aggTimer = null;
+  if (sb) { try { sb.rpc('mark_ad_daily_dirty').then(() => {}, () => {}); } catch { /* ignore */ } }
+}
 export function notifyAggChanged() {
   invalidateMappingsCache();   // 매핑이 바뀌었을 수 있으므로 캐시를 비운다 (2026-09-10)
-  if (sb) { try { sb.rpc('mark_ad_daily_dirty').then(() => {}, () => {}); } catch { /* ignore */ } }
+  if (!sb) return;
+  if (!_aggTimer && Date.now() - _aggLastSent > 5 * 60 * 1000) { _sendAggNow(); return; }
+  if (_aggTimer) clearTimeout(_aggTimer);
+  _aggTimer = setTimeout(_sendAggNow, 60000);
+}
+if (typeof window !== 'undefined') {
+  // 화면을 닫을 때 대기 중인 요청이 있으면 마지막으로 한 번 보낸다
+  window.addEventListener('pagehide', () => { if (_aggTimer) { clearTimeout(_aggTimer); _sendAggNow(); } });
 }
 
 // ─── 리포트 확장: 키워드/매체/시간대 데이터 (기간 조회) ───
