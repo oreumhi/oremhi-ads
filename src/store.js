@@ -15,7 +15,18 @@ import { uid, toLocalDateStr } from './utils';
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const hasSB = url && key && !url.includes('your-project');
-export const sb = hasSB ? createClient(url, key) : null;
+// ※ 2026-09-11 — 모든 조회에 제한시간을 겁니다(앱 전체 안전장치).
+//   서버가 집계표를 다시 만드는 동안에는 요청을 보내도 30초가 넘도록 아무 응답이 없습니다.
+//   여러 화면이 그 응답을 계속 기다리다 '로딩만 도는' 상태에 빠졌습니다
+//   (홈·팀 업무·후기·순위·리포트·하락 진단 등 8개 화면이 같은 구조였습니다).
+//   → 15초가 지나면 그 요청만 실패로 끝냅니다. 화면은 받은 것만으로라도 그려집니다.
+const REQUEST_TIMEOUT_MS = 15000;
+const timedFetch = (input, init = {}) => {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  return fetch(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+};
+export const sb = hasSB ? createClient(url, key, { global: { fetch: timedFetch } }) : null;
 
 // ─── 기본 CRUD ───
 
