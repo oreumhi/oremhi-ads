@@ -419,39 +419,61 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
   const [D, setD] = useState(null);
 
   useEffect(() => {
+    let alive = true;
     (async () => {
-      const t = today();
-      const since3 = addDays(t, -3) + 'T00:00:00';
-      const [ad, promises, perfAlerts, chatScores, chatUploads, reviewsToday, storeMap, rankHist, rankProds, users, reports, actions, events, radarRes, hbRes] = await Promise.all([
-        fetchAdDaily(16, null),
-        fetchTodayPromises(t),
-        fetchOpenPerfAlerts(),
-        fetchChatScores(null),
-        fetchChatUploads(null),
-        fetchReviewChecks(t, null),
-        fetchReviewStoreMap(),
-        fetchRankHistory(null, since3),
-        fetchRankProducts(),
-        fetchUsers(),
-        fetchReportsByDate(t),
-        fetchOpenActions(),
-        fetchEventsRange(t, t),
-        sb ? sb.from('market_radar_alerts').select('*').eq('date', t) : { data: [] },
-        sb ? sb.from('job_heartbeat').select('*') : { data: [] },
+      // ※ 2026-09-11 — '로그인하면 계속 로딩만 도는' 문제의 원인과 수정
+      //   예전에는 17개 조회를 Promise.all로 묶었는데, 그중 하나라도 응답이 안 오면
+      //   아래 setLoading(false)까지 영영 도달하지 못했습니다(오류 처리·제한시간 없음).
+      //   서버가 집계표(ad_daily)를 다시 만드는 동안에는 조회에 30초가 넘도록 응답이 없습니다.
+      //   그때마다 홈이 무한 로딩에 빠졌습니다.
+      //   → ① 각 조회에 15초 제한을 걸고 ② 실패해도 나머지는 그대로 보여 주고
+      //     ③ 무슨 일이 있어도 finally에서 로딩을 끝냅니다.
+      const T = (p, d) => Promise.race([
+        Promise.resolve(p).catch(() => d),
+        new Promise(res => setTimeout(() => res(d), 15000)),
       ]);
-      const targets = await fetchBrandTargets();
-      // 작년 동기 7일 (YOY 자동 계산 — 작년 보고서 데이터 기반)
-      const lyAd = await fetchAdDailyWindow(addDays(t, -373), addDays(t, -364));
-      setD({
-        ad: ad || [], promises: promises || [], perfAlerts: perfAlerts || [],
-        chatScores: chatScores || [], chatUploads: chatUploads || [],
-        reviewsToday: reviewsToday || [], storeMap: storeMap || [],
-        rankHist: rankHist || [], rankProds: rankProds || [],
-        users: users || [], reports: reports || [], actions: actions || [], events: events || [],
-        radar: radarRes.data || [], hb: hbRes.data || [], targets: targets || [], lyAd: lyAd || [],
-      });
-      setLoading(false);
+      try {
+        const t = today();
+        const since3 = addDays(t, -3) + 'T00:00:00';
+        const R = await Promise.allSettled([
+          T(fetchAdDaily(16, null), []),
+          T(fetchTodayPromises(t), []),
+          T(fetchOpenPerfAlerts(), []),
+          T(fetchChatScores(null), []),
+          T(fetchChatUploads(null), []),
+          T(fetchReviewChecks(t, null), []),
+          T(fetchReviewStoreMap(), []),
+          T(fetchRankHistory(null, since3), []),
+          T(fetchRankProducts(), []),
+          T(fetchUsers(), []),
+          T(fetchReportsByDate(t), []),
+          T(fetchOpenActions(), []),
+          T(fetchEventsRange(t, t), []),
+          T(sb ? sb.from('market_radar_alerts').select('*').eq('date', t) : { data: [] }, { data: [] }),
+          T(sb ? sb.from('job_heartbeat').select('*') : { data: [] }, { data: [] }),
+        ]);
+        const g = (i, d) => (R[i] && R[i].status === 'fulfilled' && R[i].value != null) ? R[i].value : d;
+        const targets = await T(fetchBrandTargets(), []);
+        const lyAd = await T(fetchAdDailyWindow(addDays(t, -373), addDays(t, -364)), []);
+        if (!alive) return;
+        const radarRes = g(13, { data: [] }), hbRes = g(14, { data: [] });
+        setD({
+          ad: g(0, []), promises: g(1, []), perfAlerts: g(2, []),
+          chatScores: g(3, []), chatUploads: g(4, []),
+          reviewsToday: g(5, []), storeMap: g(6, []),
+          rankHist: g(7, []), rankProds: g(8, []),
+          users: g(9, []), reports: g(10, []), actions: g(11, []), events: g(12, []),
+          radar: (radarRes && radarRes.data) || [], hb: (hbRes && hbRes.data) || [],
+          targets: targets || [], lyAd: lyAd || [],
+        });
+      } catch (e) {
+        console.error('[홈] 로드 실패:', e);
+        if (alive) setD(p => p || { ad: [], promises: [], perfAlerts: [], chatScores: [], chatUploads: [], reviewsToday: [], storeMap: [], rankHist: [], rankProds: [], users: [], reports: [], actions: [], events: [], radar: [], hb: [], targets: [], lyAd: [] });
+      } finally {
+        if (alive) setLoading(false);   // 무슨 일이 있어도 로딩은 끝낸다
+      }
     })();
+    return () => { alive = false; };
   }, [currentUser]);
 
   const t = today();
