@@ -32,11 +32,24 @@ const PAGE_SIZE = 5000;
 //      3번까지 시도합니다. 몰릴 때 재시도가 부하를 더 키우던 문제를 막습니다.
 const MAX_WAVE = 3;
 
+// ※ 2026-09-11 — 응답이 영영 오지 않는 경우를 끊어 줍니다.
+//   서버가 집계표를 다시 만드는 동안에는 조회 요청에 30초가 넘도록 아무 응답이 없습니다.
+//   화면 코드가 그걸 계속 기다리다 '로딩만 도는' 상태가 됐습니다.
+//   → 10초가 지나면 실패로 처리하고 넘어갑니다. 화면은 최소한 뜹니다.
+const QUERY_TIMEOUT_MS = 10000;
+function withTimeout(p, ms = QUERY_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(p).finally(() => clearTimeout(timer)),
+    new Promise(resolve => { timer = setTimeout(() => resolve({ data: null, error: { message: '응답 없음(' + (ms / 1000) + '초 초과)' } }), ms); }),
+  ]);
+}
+
 async function runWithRetry(makeQuery, page) {
   let last = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await new Promise(r => setTimeout(r, 700 * Math.pow(2, attempt - 1)));
-    last = await makeQuery(page, PAGE_SIZE);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 900));
+    last = await withTimeout(makeQuery(page, PAGE_SIZE));
     if (!last || !last.error) return last;
   }
   return last;
