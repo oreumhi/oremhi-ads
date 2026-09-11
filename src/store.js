@@ -271,6 +271,22 @@ export async function deleteMappingsByBrand(brand, ownerId) {
 // ═══════════════════════════════════════════
 
 export async function fetchUsers() { return await fetchAll('users'); }
+
+// ※ 2026-09-11 — 서버가 느릴 때 '사용자 0명'으로 오해하지 않도록
+//   users는 4명뿐인데도 서버가 밀리면 22초가 걸리거나 실패합니다.
+//   실패를 빈 배열로 돌려주면 앱이 "가입자가 없다"고 판단해 관리자 초기설정 화면을 띄웁니다.
+//   → 실패는 null로 구분해서 돌려주고, 서버가 느릴 수 있으니 간격을 두고 3번까지 시도합니다.
+//   (정렬·페이징도 뺐습니다. 4줄짜리 표에 굳이 필요 없습니다)
+export async function fetchUsersOrNull() {
+  if (!sb) return [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
+    const { data, error } = await sb.from('users').select('*');
+    if (!error) return data || [];
+    console.warn('[사용자 조회] 실패 — 재시도', attempt + 1, error.message);
+  }
+  return null;   // null = 못 불러옴(≠ 사용자 없음)
+}
 export async function createUser(user) { return await insertItem('users', { ...user, id: uid() }); }
 export async function deleteUser(id) { return await deleteItem('users', id); }
 export async function updateUser(id, updates) { return await updateItem('users', id, updates); }
