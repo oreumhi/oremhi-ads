@@ -15,7 +15,7 @@
 import React, { useState, useEffect } from 'react';
 import { C } from './config';
 import { hashPin, uid } from './utils';
-import { useStore, fetchUsers, createUser, authenticateUser, findShareLinkByCode, authenticateShareLink } from './store';
+import { useStore, fetchUsers, fetchUsersOrNull, createUser, authenticateUser, findShareLinkByCode, authenticateShareLink } from './store';
 import { Layout } from './components/Layout';
 
 // ※ 2026-09-10 속도 개선 — 광고 원본 데이터(최근 7일 36,000행 + 매핑 23,755건)를
@@ -219,7 +219,14 @@ export default function App() {
       }
 
       // 2. 사용자 체크
-      const users = await fetchUsers();
+      // ※ 2026-09-11: 서버가 느려 조회가 실패하면 예전엔 빈 배열이 와서
+      //   '가입자가 없다'고 보고 관리자 초기설정 화면을 띄웠습니다(위험).
+      //   이제 실패(null)와 진짜 0명을 구분하고, 실패는 안내 화면을 보여 줍니다.
+      const users = await fetchUsersOrNull();
+      if (users === null) {
+        setMode('db_slow');
+        return;
+      }
       if (users.length === 0) {
         setMode('setup');
         return;
@@ -293,6 +300,23 @@ export default function App() {
   if (mode === 'loading') return <Loading />;
   // 광고 원본을 받는 중일 때는, 그것이 필요한 화면에서만 로딩 화면을 보여준다 (2026-09-10)
   if (dataLoading && (mode === 'share_view' || TABS_NEEDING_DATA.includes(tab))) return <Loading />;
+
+  // 서버 응답 없음 — 무한 로딩 대신 상황을 알려 준다 (2026-09-11)
+  if (mode === 'db_slow') return (
+    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ background:C.sf, border:`1px solid ${C.bd}`, borderRadius:16, padding:40, maxWidth:420, width:'100%', textAlign:'center' }}>
+        <div style={{ fontSize:40, marginBottom:12 }}>⏳</div>
+        <div style={{ fontSize:16, fontWeight:700, color:C.tx }}>서버가 응답하지 않습니다</div>
+        <div style={{ fontSize:13, color:C.txd, marginTop:10, lineHeight:1.7 }}>
+          데이터베이스가 집계 작업으로 바쁜 상태입니다.<br />잠시 후 다시 시도해 주세요.
+        </div>
+        <button onClick={() => window.location.reload()}
+          style={{ marginTop:20, padding:'10px 22px', borderRadius:10, border:'none', background:C.ac, color:'#fff', fontWeight:700, cursor:'pointer', fontSize:14 }}>
+          다시 시도
+        </button>
+      </div>
+    </div>
+  );
 
   // 관리자 초기 설정
   if (mode === 'setup') return <AdminSetup onComplete={handleSetupComplete} />;
