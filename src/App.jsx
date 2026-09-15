@@ -22,7 +22,8 @@ import { Layout } from './components/Layout';
 //   실제로 쓰는 화면 목록. 홈·대화 분석·후기·순위·리포트·팀 업무 등은 각자 필요한 것만
 //   따로 받으므로 이 데이터가 필요 없습니다. 예전엔 어느 화면을 열든 이걸 다 받느라
 //   앱 전체가 멈춰 있었습니다.
-const TABS_NEEDING_DATA = ['dashboard', 'overview', 'upload', 'mapping', 'settings'];
+//   (2026-09-15: '클로드 자료' 화면도 광고 원본을 쓰므로 추가)
+const TABS_NEEDING_DATA = ['dashboard', 'overview', 'upload', 'mapping', 'settings', 'briefing'];
 
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
@@ -39,6 +40,7 @@ import Proposals from './pages/Proposals';
 import Questions from './pages/Questions';
 import Team from './pages/Team';
 import ProductAnalysis from './pages/ProductAnalysis';
+import Briefing from './pages/Briefing';
 import Settings from './pages/Settings';
 
 // ─── 로딩 화면 ───
@@ -364,6 +366,7 @@ export default function App() {
       {tab === 'report' && <Report currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'proposals' && <Proposals currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'aiq' && <Questions currentUser={currentUser} allowedBrands={allowedBrands} />}
+      {tab === 'briefing' && <Briefing data={data} allowedBrands={allowedBrands} currentUser={currentUser} changeRange={changeRange} rangeLoading={rangeLoading} />}
       {tab === 'diagnosis' && <Diagnosis currentUser={currentUser} allowedBrands={allowedBrands} />}
       {tab === 'scaleup' && <Scaleup allowedBrands={allowedBrands} />}
       {tab === 'team' && <Team currentUser={currentUser} />}
