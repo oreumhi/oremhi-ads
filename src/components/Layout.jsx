@@ -5,6 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import { C, TABS } from '../config';
 import { hasSB } from '../store';
+import CollectHealth from './CollectHealth';
 
 export function Layout({ tab, setTab, currentUser, onLogout, children }) {
   const [mobile, setMobile] = useState(false);
@@ -27,6 +28,7 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
       <style>{`@media print {
         .app-sidebar, .app-topbar { display: none !important; }
         .app-main { margin-left: 0 !important; padding: 0 !important; }
+        .collect-health { display: none !important; }
       }`}</style>
       {/* 모바일 상단바 */}
       {mobile && (
@@ -84,6 +86,10 @@ export function Layout({ tab, setTab, currentUser, onLogout, children }) {
 
       {/* 메인 */}
       <div className="app-main" style={{ marginLeft: mobile ? 0 : 200, padding: mobile ? '64px 14px 20px' : '20px 24px', minHeight: '100vh' }}>
+        {/* 수집이 멈추면 이 아래 모든 숫자가 거짓이 된다 — 그래서 홈이 아니라 모든 화면 맨 위 (2026-09-21) */}
+        <div className="collect-health">
+          <CollectHealth isAdmin={currentUser?.role === 'admin'} />
+        </div>
         {children}
       </div>
     </div>
