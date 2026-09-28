@@ -3,37 +3,30 @@
 //   최상단 공지사항(확인 체크·댓글) → ① 어제 성과 헤더 → ② 오늘 챙길 것(통합 경보)
 //   → ③ 광고주 신호등 보드 → ④ 자동화 가동 상태 → ⑤ 팀 현황 미니
 //   직원은 담당 브랜드 기준으로 자동 필터.
+//
+// ※ 2026-09-28 '지난 날짜 보기' 추가 (대표님 요청)
+//   ①~③(성과 카드·챙길 것·신호등)을 지난 날짜 기준으로 다시 볼 수 있습니다.
+//   · 맨 위 카드 오른쪽 ◀ 날짜 ▶ 로 '성과일'을 고릅니다. 기본값은 어제(= 평소 홈).
+//   · 성과일 X를 고르면 'X 다음날 아침에 홈을 열었을 때의 화면'을 그날 기록으로 다시 계산합니다.
+//       성과 카드  : X일 vs X-1일
+//       신호등     : X일 광고비·매출 / X까지 7일 vs 그 전 7일 / 작년 같은 때
+//       챙길 것    : X까지의 성과 경고·목표 미달, X+1일 후기 점검·경쟁사 알림·약속, X+1일까지 순위
+//   · ④ 자동화 상태·⑤ 팀 현황은 날짜와 무관하게 항상 '지금' 상태입니다.
+//   · 브랜드 목표(ROAS·1일 예산)는 과거 값이 남지 않아 지금 설정값으로 계산합니다(화면에 표기).
+//   · 계산은 homeCompute.js로 옮겼고, 평소 화면(어제)은 예전과 결과가 완전히 같습니다.
 // ============================================
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { C } from '../config';
 import { sb, fetchAdDaily, fetchAdDailyWindow, fetchUsers, fetchBrandTargets } from '../store';
-import { fetchTodayPromises, fetchOpenPerfAlerts, fetchReportsByDate, fetchOpenActions, fetchEventsRange } from '../team';
+import { fetchTodayPromises, fetchOpenPerfAlerts, fetchPerfAlertsRange, fetchReportsByDate, fetchOpenActions, fetchEventsRange } from '../team';
 import { fetchChatScores, fetchChatUploads, fetchReviewChecks, fetchReviewStoreMap } from '../chat';
 import { fetchRankHistory, fetchRankProducts } from '../rank';
 import { fmtNum, uid, today } from '../utils';
-
-const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
-const won = (n) => '₩' + fmtNum(Math.round(n || 0));
-const WD = ['일', '월', '화', '수', '목', '금', '토'];
-const dayLabel = (s) => { const d = new Date(s + 'T00:00:00'); return `${d.getMonth() + 1}/${d.getDate()} (${WD[d.getDay()]})`; };
-const norm = (s) => (s || '').toLowerCase().replace(/[\s()\-_.·,/&+]/g, '').replace(/숍/g, '솝');
-const nMatch = (a, b) => { const x = norm(a), y = norm(b); return !!x && !!y && (x.includes(y) || y.includes(x)); };
-const timeAgo = (iso) => {
-  if (!iso) return '';
-  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (m < 1) return '방금'; if (m < 60) return `${m}분 전`;
-  const h = Math.floor(m / 60); if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
-};
-const hhmm = (iso) => { if (!iso) return ''; const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-
-const sumM = (rows) => rows.reduce((a, r) => ({
-  imp: a.imp + (+r.impressions || 0), cost: a.cost + (+r.cost || 0),
-  conv: a.conv + (+r.conversions || 0), rev: a.rev + (+(r.revenue ?? r.conv_revenue) || 0),
-}), { imp: 0, cost: 0, conv: 0, rev: 0 });
-const roasOf = (m) => (m.cost > 0 ? m.rev / m.cost * 100 : 0);
+import {
+  addDays, won, dayLabel, mdLabel, timeAgo, MIN_DATE, endOfDayKstISO,
+  computeHero, computeBoard, computeJobs,
+} from '../homeCompute';
 
 // 공용 카드
 const card = { background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 14, padding: '16px 18px' };
@@ -202,18 +195,54 @@ function NoticeBoard({ currentUser, isAdmin }) {
 }
 
 // ─────────────────────────────────────────────
-// ① 어제 성과 헤더
+// ① 성과 헤더 (+ 지난 날짜 고르기)
 // ─────────────────────────────────────────────
-function HeroHeader({ adData, allowedBrands, userName }) {
-  const t = today();
-  const y1 = addDays(t, -1), y2 = addDays(t, -2);
-  const inB = (b) => !allowedBrands || allowedBrands.includes(b);
-  const m1 = sumM(adData.filter(r => r.date === y1 && inB(r.brand)));
-  const m2 = sumM(adData.filter(r => r.date === y2 && inB(r.brand)));
-  const r1 = roasOf(m1), r2 = roasOf(m2);
-  const delta = (cur, prev, fmt) => {
+// 성과일 고르기: ◀ [날짜] ▶ [어제로]
+function DateNav({ cur, yday, isPast, onPick, onReset }) {
+  // 입력칸은 '입력 중인 값'을 따로 들고 있습니다.
+  //   키보드로 연도를 한 자리씩 치면 중간에 0002년 같은 값이 잠깐 생기는데,
+  //   그걸 무시하더라도 칸이 원래 날짜로 튕겨 돌아가지 않게 하기 위함입니다.
+  const [draft, setDraft] = useState(cur);
+  useEffect(() => { setDraft(cur); }, [cur]);
+  const canPrev = cur > MIN_DATE;
+  const canNext = cur < yday;
+  // 수집 시작일보다 앞 날짜를 끝까지 입력한 경우(입력 중인 0002년 등은 제외) → 빨간 테두리로 알림
+  const tooOld = !!draft && draft.length === 10 && draft >= '1900-01-01' && draft < MIN_DATE;
+  const nb = (on) => ({
+    width: 30, height: 30, borderRadius: 8, border: '1px solid #3a4568', background: on ? '#ffffff0d' : 'transparent',
+    color: on ? '#dfe5f5' : '#434b68', fontSize: 11, cursor: on ? 'pointer' : 'default', padding: 0,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  });
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 10.5, color: '#8b95b8', fontWeight: 600 }}>성과일</span>
+      <button type="button" title="하루 전" disabled={!canPrev} onClick={() => { if (canPrev) onPick(addDays(cur, -1)); }} style={nb(canPrev)}>◀</button>
+      <input type="date" value={draft} min={MIN_DATE} max={yday}
+        title={tooOld ? `${MIN_DATE} 이전은 광고 기록이 없어 볼 수 없습니다` : '날짜를 고르면 그날 기준 화면으로 바뀝니다'}
+        onChange={e => {
+          const v = e.target.value;
+          // 어제 이후(오늘·미래)는 아직 성과가 없음 → 곧바로 어제로 되돌려 보여 줌
+          if (v && v.length === 10 && v >= MIN_DATE && v > yday) { setDraft(yday); onPick(yday); return; }
+          setDraft(v); onPick(v);
+        }}
+        onBlur={() => setDraft(cur)}
+        style={{
+          background: isPast ? '#3a2f12' : '#ffffff0d', border: `1px solid ${tooOld ? C.no : isPast ? '#b8912e' : '#3a4568'}`, borderRadius: 8,
+          padding: '0 8px', height: 30, boxSizing: 'border-box', color: '#fff', fontSize: 12.5, fontWeight: 700,
+          colorScheme: 'dark', outline: 'none', fontFamily: 'inherit',
+        }} />
+      <button type="button" title="하루 뒤" disabled={!canNext} onClick={() => { if (canNext) onPick(addDays(cur, 1)); }} style={nb(canNext)}>▶</button>
+      {isPast && (
+        <button type="button" onClick={onReset} title="평소 화면(어제 성과)으로 돌아가기" style={{ height: 30, borderRadius: 8, border: 'none', background: C.ac, color: '#fff', fontSize: 11.5, fontWeight: 700, padding: '0 12px', cursor: 'pointer', flexShrink: 0 }}>어제로</button>
+      )}
+    </div>
+  );
+}
+
+function HeroHeader({ hero, allowedBrands, userName, cur, yday, isPast, onPick, onReset, loading, failed, onRetry }) {
+  const delta = (c, prev, fmt) => {
     if (!prev) return null;
-    const g = (cur - prev) / prev * 100;
+    const g = (c - prev) / prev * 100;
     const up = g >= 0;
     return <span style={{ fontSize: 11, fontWeight: 700, color: up ? C.ok : C.no }}>{up ? '▲' : '▼'} {Math.abs(g).toFixed(1)}%{fmt ? '' : ''}</span>;
   };
@@ -223,22 +252,65 @@ function HeroHeader({ adData, allowedBrands, userName }) {
     <div style={{ flex: 1, minWidth: 150 }}>
       <div style={{ fontSize: 11, color: '#aab3d0', marginBottom: 5, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: -0.5 }}>{value}</div>
-      <div style={{ marginTop: 3, minHeight: 14 }}>{d}<span style={{ fontSize: 10, color: '#8890a6', marginLeft: 5 }}>{d ? '그제 대비' : ''}</span></div>
+      <div style={{ marginTop: 3, minHeight: 14 }}>{d}<span style={{ fontSize: 10, color: '#8890a6', marginLeft: 5 }}>{d ? (isPast ? '전일 대비' : '그제 대비') : ''}</span></div>
     </div>
   );
+  const bar = (color, children) => (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: color + '14', border: `1px solid ${color}44`, borderRadius: 9, padding: '7px 11px', marginBottom: 14, fontSize: 11.5, color }}>{children}</div>
+  );
   return (
-    <div style={{ borderRadius: 16, padding: '20px 22px', background: 'linear-gradient(135deg, #1c2a52 0%, #151a2e 60%, #131620 100%)', border: '1px solid #2c3554', position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: -60, right: -40, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle, #5b8def22, transparent 70%)' }} />
-      <div style={{ fontSize: 12.5, color: '#aab3d0', marginBottom: 3 }}>{greet}, <b style={{ color: '#fff' }}>{userName}</b>님</div>
-      <div style={{ fontSize: 11, color: '#7683a8', marginBottom: 14 }}>
-        어제 {dayLabel(y1)} {allowedBrands ? '담당 브랜드' : '회사 전체'} 성과 <span style={{ color: '#5c6685' }}>· 전환·매출·ROAS는 구매완료 기준</span>
+    <div style={{
+      borderRadius: 16, padding: '20px 22px', position: 'relative', overflow: 'hidden',
+      background: isPast ? 'linear-gradient(135deg, #2d2714 0%, #1a1a1c 60%, #131620 100%)' : 'linear-gradient(135deg, #1c2a52 0%, #151a2e 60%, #131620 100%)',
+      border: isPast ? '1px solid #6b5a2a' : '1px solid #2c3554',
+    }}>
+      {/* 장식 원 — 클릭을 가로채지 않게 pointerEvents 끔 (오른쪽 위 날짜 버튼과 겹침) */}
+      <div style={{ position: 'absolute', top: -60, right: -40, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle, #5b8def22, transparent 70%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, color: '#aab3d0', marginBottom: 3 }}>{greet}, <b style={{ color: '#fff' }}>{userName}</b>님</div>
+          <div style={{ fontSize: 11, color: '#7683a8' }}>
+            {isPast ? '' : '어제 '}{dayLabel(cur)} {allowedBrands ? '담당 브랜드' : '회사 전체'} 성과 <span style={{ color: '#5c6685' }}>· 전환·매출·ROAS는 구매완료 기준</span>
+          </div>
+        </div>
+        <DateNav cur={cur} yday={yday} isPast={isPast} onPick={onPick} onReset={onReset} />
       </div>
-      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
-        {box('광고비', won(m1.cost), delta(m1.cost, m2.cost))}
-        {box('구매완료 매출', won(m1.rev), delta(m1.rev, m2.rev))}
-        {box('구매완료 ROAS', Math.round(r1) + '%', r2 > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: r1 >= r2 ? C.ok : C.no }}>{r1 >= r2 ? '▲' : '▼'} {Math.round(Math.abs(r1 - r2))}%p</span> : null)}
-        {box('구매완료 전환수', fmtNum(m1.conv) + '건', delta(m1.conv, m2.conv))}
-      </div>
+      {isPast && bar(C.yel, (
+        <>
+          <b>📅 지난 날짜 보기</b>
+          <span style={{ color: '#d9cb98' }}>{dayLabel(cur)} 성과 기준으로 그날 기록을 다시 계산한 화면입니다 · 맨 아래 자동화 상태·팀 현황은 오늘 기준</span>
+        </>
+      ))}
+      {!!(failed && failed.length) && bar(C.no, (
+        <>
+          <b>⚠ 일부 자료를 불러오지 못했습니다</b>
+          <span>({failed.join(', ')}) — 화면이 실제와 다를 수 있습니다</span>
+          <button type="button" onClick={onRetry} style={{ marginLeft: 'auto', background: C.no, border: 'none', borderRadius: 7, padding: '4px 11px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>다시 불러오기</button>
+        </>
+      ))}
+      {loading ? (
+        <div style={{ position: 'relative', minHeight: 58, display: 'flex', alignItems: 'center', color: '#aab3d0', fontSize: 12.5 }}>⏳ {dayLabel(cur)} 기록을 불러오는 중…</div>
+      ) : !hero ? (
+        <div style={{ position: 'relative', minHeight: 58, display: 'flex', alignItems: 'center', color: '#f3a0a0', fontSize: 12.5 }}>
+          {dayLabel(cur)} 기록을 불러오지 못했습니다 — 위의 [다시 불러오기]를 눌러 주세요.
+        </div>
+      ) : isPast && failed && failed.includes('광고 성과') ? (
+        // 불러오기에 실패한 것을 '기록 없음'으로 말하면 안 됩니다 — 사실과 다른 안내가 됩니다
+        <div style={{ position: 'relative', minHeight: 58, display: 'flex', alignItems: 'center', color: '#f3a0a0', fontSize: 12.5 }}>
+          {dayLabel(cur)} 광고 성과를 불러오지 못했습니다 — 위의 [다시 불러오기]를 눌러 주세요.
+        </div>
+      ) : isPast && hero.n1 === 0 ? (
+        <div style={{ position: 'relative', minHeight: 58, display: 'flex', alignItems: 'center', color: '#aab3d0', fontSize: 12.5 }}>
+          {dayLabel(cur)}에는 {allowedBrands ? '담당 브랜드의 ' : ''}광고 성과 기록이 없습니다.
+        </div>
+      ) : (
+        <div style={{ position: 'relative', display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+          {box('광고비', won(hero.m1.cost), delta(hero.m1.cost, hero.m2.cost))}
+          {box('구매완료 매출', won(hero.m1.rev), delta(hero.m1.rev, hero.m2.rev))}
+          {box('구매완료 ROAS', Math.round(hero.r1) + '%', hero.r2 > 0 ? <span style={{ fontSize: 11, fontWeight: 700, color: hero.r1 >= hero.r2 ? C.ok : C.no }}>{hero.r1 >= hero.r2 ? '▲' : '▼'} {Math.round(Math.abs(hero.r1 - hero.r2))}%p</span> : null)}
+          {box('구매완료 전환수', fmtNum(hero.m1.conv) + '건', delta(hero.m1.conv, hero.m2.conv))}
+        </div>
+      )}
     </div>
   );
 }
@@ -248,14 +320,14 @@ function HeroHeader({ adData, allowedBrands, userName }) {
 // ─────────────────────────────────────────────
 const SEV = { high: { c: C.no, t: '긴급' }, mid: { c: C.warn, t: '주의' }, info: { c: C.ac, t: '안내' } };
 
-function TodoList({ items, setTab }) {
+function TodoList({ items, setTab, title = '오늘 챙길 것', emptyText = '✅ 오늘은 특이사항이 없습니다. 편안한 하루 되세요.' }) {
   const [showAll, setShowAll] = useState(false);
   const list = showAll ? items : items.slice(0, 5);   // 기본 5건만 (2026-07-28 대표님 지시)
   return (
     <div style={card}>
-      {secTitle('🚨', '오늘 챙길 것', items.length > 0 && <span style={{ fontSize: 10.5, color: C.no, background: '#f0707022', border: '1px solid #f0707044', borderRadius: 10, padding: '1px 8px', fontWeight: 700 }}>{items.length}건</span>)}
+      {secTitle('🚨', title, items.length > 0 && <span style={{ fontSize: 10.5, color: C.no, background: '#f0707022', border: '1px solid #f0707044', borderRadius: 10, padding: '1px 8px', fontWeight: 700 }}>{items.length}건</span>)}
       {!items.length ? (
-        <div style={{ fontSize: 12.5, color: C.txd, padding: '6px 2px' }}>✅ 오늘은 특이사항이 없습니다. 편안한 하루 되세요.</div>
+        <div style={{ fontSize: 12.5, color: C.txd, padding: '6px 2px' }}>{emptyText}</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {list.map((it, i) => (
@@ -286,7 +358,9 @@ function TodoList({ items, setTab }) {
 // ─────────────────────────────────────────────
 // ③ 광고주 신호등 보드
 // ─────────────────────────────────────────────
-function SignalBoard({ rows }) {
+const SIGNAL_NOTE = '· 신호에 마우스를 올리면 상세 사유가 표시됩니다 · 성과: 목표 기재 시 목표 ROAS 기준, 미기재 시 최근 7일 vs 직전 7일 · 목표 달성: 최근 7일 ROAS ÷ 목표 ROAS (설정 → 🎯 브랜드 목표 관리) · 대화: 최신 소통 점수 · 후기: 오늘 점검 결과 · 순위: 최신 수집 결과';
+
+function SignalBoard({ rows, dayWord = '어제', goalRange = '최근 7일', note = SIGNAL_NOTE, emptyText = '표시할 브랜드가 없습니다 (이 기간에 광고 기록이 없음)' }) {
   const G = { green: C.ok, yellow: C.yel, red: C.no, gray: '#3a4056' };
   const legend = (c, t) => <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: C.txd }}><Dot color={G[c]} /> {t}</span>;
   return (
@@ -301,8 +375,8 @@ function SignalBoard({ rows }) {
           <thead>
             <tr style={{ color: C.txm, fontSize: 10.5 }}>
               <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 600 }}>브랜드</th>
-              <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>어제 광고비</th>
-              <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>어제 매출</th>
+              <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>{dayWord} 광고비</th>
+              <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>{dayWord} 매출</th>
               <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>ROAS</th>
               <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 600 }}>목표 달성</th>
               {['성과', '대화', '후기', '순위'].map(h => <th key={h} style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 600 }}>{h}</th>)}
@@ -315,7 +389,7 @@ function SignalBoard({ rows }) {
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.cost > 0 ? won(r.cost) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, color: C.tx, textAlign: 'right', whiteSpace: 'nowrap' }}>{r.rev > 0 ? won(r.rev) : <span style={{ color: C.txm }}>—</span>}</td>
                 <td style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: r.cost > 0 ? (r.roas >= 300 ? C.ok : r.roas >= 100 ? C.tx : C.no) : C.txm }}>{r.cost > 0 ? Math.round(r.roas) + '%' : '—'}</td>
-                <td title={(r.goal && r.goal.target ? `목표 ROAS ${fmtNum(r.goal.target)}% 기준 · 최근 7일` : '목표 미기재 (설정 → 브랜드 목표 관리)') + (r.goal && r.goal.yoyDiff != null ? ` · 작년 동기 대비 ${r.goal.yoyDiff >= 0 ? '+' : ''}${r.goal.yoyDiff}%p (작년 데이터 자동 비교)` : '')}
+                <td title={(r.goal && r.goal.target ? `목표 ROAS ${fmtNum(r.goal.target)}% 기준 · ${goalRange}` : '목표 미기재 (설정 → 브랜드 목표 관리)') + (r.goal && r.goal.yoyDiff != null ? ` · 작년 동기 대비 ${r.goal.yoyDiff >= 0 ? '+' : ''}${r.goal.yoyDiff}%p (작년 데이터 자동 비교)` : '')}
                   style={{ padding: '8px 8px', fontSize: 12, textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', color: !(r.goal && r.goal.rate != null) ? C.txm : r.goal.rate >= 100 ? C.ok : r.goal.rate >= 90 ? C.yel : C.no }}>
                   {r.goal && r.goal.rate != null ? r.goal.rate + '%' : '—'}
                   {r.goal && r.goal.yoyDiff != null && (
@@ -329,10 +403,13 @@ function SignalBoard({ rows }) {
                 ))}
               </tr>
             ))}
+            {!rows.length && (
+              <tr><td colSpan={9} style={{ padding: '14px 8px', fontSize: 12, color: C.txd, textAlign: 'center' }}>{emptyText}</td></tr>
+            )}
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 10, color: C.txm, marginTop: 8 }}>· 신호에 마우스를 올리면 상세 사유가 표시됩니다 · 성과: 목표 기재 시 목표 ROAS 기준, 미기재 시 최근 7일 vs 직전 7일 · 목표 달성: 최근 7일 ROAS ÷ 목표 ROAS (설정 → 🎯 브랜드 목표 관리) · 대화: 최신 소통 점수 · 후기: 오늘 점검 결과 · 순위: 최신 수집 결과</div>
+      <div style={{ fontSize: 10, color: C.txm, marginTop: 8 }}>{note}</div>
     </div>
   );
 }
@@ -411,12 +488,62 @@ function TeamMini({ staff, reports, overdue, events, setTab }) {
 }
 
 // ─────────────────────────────────────────────
+// 지난 날짜 자료 불러오기 (2026-09-28)
+//   asOf = 그 화면의 '오늘' (= 고른 성과일 + 1일)
+//   평소 홈이 '지금까지 쌓인 기록'을 보듯이, 그날까지 쌓여 있던 기록만 기간을 좁혀 가져옵니다.
+//   목표·후기 매장 연결은 과거 값이 따로 없어 평소 홈이 받아 둔 지금 값을 함께 씁니다.
+// ─────────────────────────────────────────────
+const PAST_TIMEOUT = 15000;   // 평소 홈과 같은 15초 제한 (서버가 집계표를 다시 만드는 중이면 응답이 늦음)
+
+// 제한시간 안에 안 오거나 실패하면 기본값으로 넘어가고, 어떤 자료가 빠졌는지 기록합니다.
+function withTimeout(name, p, fallback, failed) {
+  return new Promise(resolve => {
+    let done = false;
+    const timer = setTimeout(() => { if (!done) { done = true; failed.add(name); resolve(fallback); } }, PAST_TIMEOUT);
+    Promise.resolve(p).then(
+      v => { if (!done) { done = true; clearTimeout(timer); resolve(v == null ? fallback : v); } },
+      () => { if (!done) { done = true; clearTimeout(timer); failed.add(name); resolve(fallback); } },
+    );
+  });
+}
+
+export async function loadPastData(asOf) {   // (검증 스크립트에서도 같은 함수를 쓰려고 내보냄)
+  const failed = new Set();
+  const y1 = addDays(asOf, -1);   // 성과일
+  const [ad, lyAd, perfAlerts, promises, chatScores, reviewsToday, rankHist, radarRes] = await Promise.all([
+    // 광고 성과: 평소 홈과 같은 16일 폭. 그날 당일 자료는 그날엔 아직 없었으므로 성과일까지만.
+    withTimeout('광고 성과', fetchAdDailyWindow(addDays(asOf, -16), y1), [], failed),
+    withTimeout('작년 같은 때', fetchAdDailyWindow(addDays(asOf, -373), addDays(asOf, -364)), [], failed),
+    // 성과 경고: 최근 7일치. 경고는 성과일 다음날 새벽에 만들어지므로 성과일 것까지가 그날 보이던 것.
+    withTimeout('성과 경고', fetchPerfAlertsRange(addDays(asOf, -7), y1), [], failed),
+    withTimeout('약속', fetchTodayPromises(asOf), [], failed),
+    // 대화 점수: 대화 마지막 날 다음날 새벽에 만들어짐 → 성과일까지 끝난 대화의 점수가 그날 보이던 것.
+    withTimeout('대화 점수', fetchChatScores(null, y1), [], failed),
+    withTimeout('후기 점검', fetchReviewChecks(asOf, null), [], failed),
+    // 순위: 평소 홈과 같은 3일 폭, 그날 24시(한국시간)까지 수집분.
+    withTimeout('순위', fetchRankHistory(null, addDays(asOf, -3) + 'T00:00:00', endOfDayKstISO(asOf)), [], failed),
+    withTimeout('경쟁사 알림', sb ? sb.from('market_radar_alerts').select('*').eq('date', asOf) : { data: [] }, { data: [] }, failed),
+  ]);
+  if (radarRes && radarRes.error) failed.add('경쟁사 알림');
+  return {
+    data: { ad, lyAd, perfAlerts, promises, chatScores, reviewsToday, rankHist, radar: (radarRes && radarRes.data) || [] },
+    failed: [...failed],
+  };
+}
+
+// ─────────────────────────────────────────────
 // 메인
 // ─────────────────────────────────────────────
 export default function Home({ currentUser, allowedBrands, setTab }) {
   const isAdmin = currentUser?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [D, setD] = useState(null);
+
+  // ── 지난 날짜 보기 ──
+  const [selDate, setSelDate] = useState(null);   // 고른 성과일. null = 평소 화면(어제 성과)
+  const [pastTick, setPastTick] = useState(0);    // 지난 날짜 자료가 도착하면 화면을 다시 그리기 위한 신호
+  const pastCache = useRef(new Map());            // asOf → { data, failed } — 한 번 본 날짜는 즉시 다시 보여 줌
+  const pastBusy = useRef(new Set());             // 지금 불러오는 중인 asOf (같은 날짜 중복 요청 방지)
 
   useEffect(() => {
     let alive = true;
@@ -476,258 +603,62 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
     return () => { alive = false; };
   }, [currentUser]);
 
-  const t = today();
-  const inB = useCallback((b) => !allowedBrands || !b || allowedBrands.some(ab => nMatch(ab, b)), [allowedBrands]);
+  // 다른 사람으로 로그인하면 지난 날짜 기록을 비우고 평소 화면으로
+  useEffect(() => { pastCache.current.clear(); setSelDate(null); }, [currentUser?.id]);
 
-  // ── 브랜드별 성과 (7 vs 7) + 신호등 ──
+  const t = today();
+  const yday = addDays(t, -1);
+  const isPast = !!selDate && selDate < yday;           // 어제(평소 화면)보다 앞 날짜를 골랐을 때만 '지난 날짜'
+  const asOfPast = isPast ? addDays(selDate, 1) : null; // 그 화면의 '오늘'
+  const cur = isPast ? selDate : yday;                  // 지금 보여 주는 성과일
+
+  // 지난 날짜 자료 불러오기 — 0.35초 기다렸다가 시작 (◀를 연달아 누를 때 중간 날짜 요청이 쌓이지 않게)
+  useEffect(() => {
+    if (!asOfPast) return undefined;
+    if (pastCache.current.has(asOfPast) || pastBusy.current.has(asOfPast)) return undefined;
+    const key = asOfPast;
+    const timer = setTimeout(() => {
+      pastBusy.current.add(key);
+      loadPastData(key)
+        .then(res => { pastCache.current.set(key, res); })
+        .catch(e => { console.error('[홈] 지난 날짜 로드 실패:', e); pastCache.current.set(key, { data: null, failed: ['전체'] }); })
+        .finally(() => { pastBusy.current.delete(key); setPastTick(n => n + 1); });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [asOfPast, pastTick]);
+
+  const pickDate = useCallback((d) => {
+    if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d) || d < MIN_DATE) return;   // 지우는 중·입력 중인 값은 무시
+    const yd = addDays(today(), -1);
+    setSelDate(d >= yd ? null : d);                                       // 어제(또는 그 뒤)를 고르면 평소 화면
+  }, []);
+  const resetDate = useCallback(() => setSelDate(null), []);
+  const retryPast = useCallback(() => {
+    if (!asOfPast) return;
+    pastCache.current.delete(asOfPast);
+    setPastTick(n => n + 1);
+  }, [asOfPast]);
+
+  // ── 평소 화면 계산 (예전 코드와 결과 동일) ──
   const computed = useMemo(() => {
     if (!D) return null;
-    const y1 = addDays(t, -1);
-    const rS = addDays(t, -7), pS = addDays(t, -14), pE = addDays(t, -8), l2 = addDays(t, -2);
+    const b = computeBoard(D, { asOf: t, allowedBrands });
+    return { rows: b.rows, todos: b.todos, jobs: computeJobs(D, t) };
+  }, [D, allowedBrands, t]);
 
-    const byBrand = {};
-    D.ad.forEach(r => {
-      if (allowedBrands && !allowedBrands.includes(r.brand)) return;
-      const b = (byBrand[r.brand] = byBrand[r.brand] || { recent: [], prev: [], yday: [], r2imp: 0 });
-      if (r.date >= rS && r.date <= y1) b.recent.push(r);
-      if (r.date >= pS && r.date <= pE) b.prev.push(r);
-      if (r.date === y1) b.yday.push(r);
-      if (r.date >= l2 && r.date <= y1) b.r2imp += (+r.impressions || 0);
-    });
+  // ── 지난 날짜 계산 ──
+  const pastEntry = asOfPast ? pastCache.current.get(asOfPast) : null;   // pastTick이 바뀌면 다시 읽힘
+  const pastComputed = useMemo(() => {
+    if (!asOfPast || !pastEntry || !pastEntry.data || !D) return null;
+    const PD = { ...pastEntry.data, storeMap: D.storeMap, targets: D.targets };
+    return computeBoard(PD, { asOf: asOfPast, allowedBrands, past: true });
+  }, [asOfPast, pastEntry, D, allowedBrands]);
 
-    // 최신 대화 점수 (광고주별)
-    const latestScore = {};
-    D.chatScores.forEach(s => {
-      const k = s.client_name;
-      if (!latestScore[k] || (s.period_end || '') > (latestScore[k].period_end || '')) latestScore[k] = s;
-    });
-    // 오늘 후기 (매장→브랜드 매핑)
-    const storeBrand = {}; D.storeMap.forEach(m => { storeBrand[m.store] = m.brand || m.store; });
-    // 순위: 제품별 최신 + 전일
-    const rankByProduct = {};
-    D.rankHist.forEach(h => {
-      if ((h.product || '').includes('예시')) return;   // [예시] 테스트 상품은 알림·신호등에서 제외
-      const k = `${h.brand}·${h.product || ''}·${h.keyword}·${h.ad_type || ''}`;
-      const day = (h.collected_at || '').slice(0, 10);
-      const e = (rankByProduct[k] = rankByProduct[k] || { brand: h.brand, keyword: h.keyword, product: h.product, days: {} });
-      if (!(day in e.days)) e.days[day] = h.rank;   // 최신순 정렬 → 첫 값 유지
-    });
-
-    const todos = [];
-    const rows = [];
-
-    // 저장된 성과 경고를 '현재 데이터'로 재검증 (며칠 전 만들어진 경고가 상황이 바뀌었는데도 뜨는 것 방지)
-    const liveByBrand = {};
-    Object.entries(byBrand).forEach(([b, d]) => {
-      const rec = sumM(d.recent), prev = sumM(d.prev);
-      liveByBrand[b] = { rCost: rec.cost, pCost: prev.cost, rRev: rec.rev, pRev: prev.rev, rRoas: roasOf(rec), pRoas: roasOf(prev) };
-    });
-    const perfStillValid = (p) => {
-      const lv = liveByBrand[p.brand];
-      if (!lv) return false;   // 현재 데이터로 확인 안 되면 표시하지 않음 (오탐 방지 우선)
-      const title = p.title || '';
-      if (title.includes('예산') || title.includes('광고비 급감')) {
-        // 실제로 지금도 광고비가 30% 이상 줄어 있을 때만 유효
-        return lv.pCost > 0 && lv.rCost < lv.pCost * 0.70;
-      }
-      if (title.includes('매출')) {
-        return lv.pRev > 0 && lv.rRev < lv.pRev * 0.85;
-      }
-      if (title.includes('ROAS')) {
-        return lv.pRoas > 0 && lv.rRoas < lv.pRoas * 0.85;
-      }
-      if (title.includes('노출') || title.includes('중단')) {
-        return lv.pCost > 0 && lv.rCost < lv.pCost * 0.5;
-      }
-      return true;
-    };
-
-    // 성과 경고 이벤트: 최근 7일 것 + 현재도 유효한 것만, 브랜드당 최신 1건
-    const recentPerf = [];
-    const seenPerfBrand = new Set();
-    D.perfAlerts.filter(p => inB(p.brand) && (p.event_date || '') >= addDays(t, -7) && perfStillValid(p)).forEach(p => {
-      if (seenPerfBrand.has(p.brand)) return;
-      seenPerfBrand.add(p.brand);
-      recentPerf.push(p);
-    });
-
-    // 브랜드 목표 (담당자 기재 — 설정의 '브랜드 목표 관리')
-    const targetBy = {};
-    (D.targets || []).forEach(x => { targetBy[x.brand] = x; });
-    // 작년 동기 7일 브랜드별 합계 (YOY 자동)
-    const lyBy = {};
-    const lyS = addDays(t, -372), lyE = addDays(t, -366);
-    (D.lyAd || []).forEach(r => {
-      if (r.date < lyS || r.date > lyE) return;
-      const e = (lyBy[r.brand] = lyBy[r.brand] || { cost: 0, rev: 0 });
-      e.cost += +r.cost || 0; e.rev += +(r.revenue ?? r.conv_revenue) || 0;
-    });
-
-    Object.entries(byBrand).forEach(([brand, d]) => {
-      const rec = sumM(d.recent), prev = sumM(d.prev), yd = sumM(d.yday);
-      const rRoas = roasOf(rec), pRoas = roasOf(prev);
-      const tg = targetBy[brand];
-      let perf = { s: rec.cost > 1000 ? 'green' : 'gray', t: rec.cost > 1000 ? '최근 7일 정상 집행' : '최근 집행 없음' };
-      if (rec.cost > 1000 || prev.cost > 1000) {
-        const prevDailyImp = prev.imp / 7;
-        if (prevDailyImp > 500 && d.r2imp < prevDailyImp * 0.2) {
-          perf = { s: 'red', t: '노출 급감 — 광고 중단 의심' };
-          if (!seenPerfBrand.has(brand)) todos.push({ sev: 'high', brand, title: '노출 급감 — 광고 중단 의심', desc: '최근 노출이 이전 평균의 20% 미만', tab: 'diagnosis' });
-        } else if (tg && +tg.target_roas > 0 && rec.cost > 30000) {
-          // 목표가 있으면 목표 기준으로 판단 (담당자가 정한 기준이 우선)
-          const rate = rRoas / +tg.target_roas * 100;
-          if (rate < 70) {
-            perf = { s: 'red', t: `목표 ROAS ${fmtNum(+tg.target_roas)}% 대비 ${Math.round(rate)}% 달성 — 크게 미달` };
-            todos.push({ sev: 'high', brand, title: '목표 ROAS 크게 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}% (달성 ${Math.round(rate)}%)`, tab: 'diagnosis' });
-          } else if (rate < 90) {
-            perf = { s: 'yellow', t: `목표 ROAS 대비 ${Math.round(rate)}% 달성 — 미달` };
-            todos.push({ sev: 'mid', brand, title: '목표 ROAS 미달', desc: `목표 ${fmtNum(+tg.target_roas)}% · 최근7일 ${Math.round(rRoas)}%`, tab: 'diagnosis' });
-          } else {
-            perf = { s: 'green', t: `목표 ROAS 대비 ${Math.round(rate)}% 달성` };
-          }
-        } else if (pRoas > 50 && rec.cost > 30000 && rRoas < pRoas * 0.7) {
-          // 목표 미기재 브랜드는 기존처럼 자기 과거 대비로 판단
-          const stillGood = rRoas >= 400;
-          perf = { s: stillGood ? 'yellow' : 'red', t: `ROAS 하락 ${Math.round(pRoas)}%→${Math.round(rRoas)}%` };
-          if (!seenPerfBrand.has(brand)) todos.push({ sev: stillGood ? 'mid' : 'high', brand, title: 'ROAS 하락', desc: `${Math.round(pRoas)}% → ${Math.round(rRoas)}%`, tab: 'diagnosis' });
-        } else if (pRoas > 50 && rRoas < pRoas * 0.85) {
-          perf = { s: 'yellow', t: `ROAS 완만한 하락 (${Math.round(rRoas)}%)` };
-        }
-      }
-      // 1일 예산 대비 어제 집행 점검 (목표 기재 시)
-      if (tg && +tg.daily_budget > 0 && yd.cost >= 0) {
-        const b = +tg.daily_budget;
-        if (yd.cost > b * 1.2) {
-          todos.push({ sev: 'high', brand, title: '1일 예산 초과', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'diagnosis' });
-        } else if (yd.cost < b * 0.3 && d.yday.length > 0) {
-          todos.push({ sev: 'high', brand, title: '예산 대비 집행 급감 — 광고 축소·중단 의심', desc: `예산 ${won(b)} · 어제 집행 ${won(yd.cost)} (${Math.round(yd.cost / b * 100)}%)`, tab: 'diagnosis' });
-        } else if (yd.cost < b * 0.3 && d.yday.length === 0 && rec.cost > 1000) {
-          todos.push({ sev: 'high', brand, title: '어제 집행 기록 없음', desc: `1일 예산 ${won(b)}인데 어제 데이터가 없습니다`, tab: 'diagnosis' });
-        }
-      }
-      // 대화 신호
-      let chat = { s: 'gray', t: '연결된 대화방 없음' };
-      const sc = Object.entries(latestScore).find(([cn]) => nMatch(cn, brand));
-      if (sc) {
-        const total = +sc[1].score_total || 0;
-        const silent = sc[1].period_end ? Math.floor((new Date(t) - new Date(sc[1].period_end)) / 86400000) : 0;
-        if (silent >= 14) chat = { s: 'red', t: `${silent}일째 대화 없음 (침묵)` };
-        else chat = total >= 60 ? { s: 'green', t: `소통 점수 ${total}점 (양호)` } : total >= 40 ? { s: 'yellow', t: `소통 점수 ${total}점 (보통)` } : { s: 'red', t: `소통 점수 ${total}점 (개선 필요)` };
-      }
-      // 후기 신호
-      let review = { s: 'gray', t: '오늘 점검 결과 없음' };
-      const myChecks = D.reviewsToday.filter(c => nMatch(storeBrand[c.store] || c.store, brand));
-      if (myChecks.length) {
-        const low = myChecks.reduce((a, c) => a + (+c.low_count || 0), 0);
-        review = low > 0 ? { s: 'red', t: `오늘 저평점 후기 ${low}건` } : { s: 'green', t: '오늘 점검 완료 — 저평점 없음' };
-      }
-      // 순위 신호
-      let rank = { s: 'gray', t: '등록된 순위 상품 없음' };
-      const myRanks = Object.values(rankByProduct).filter(e => e.brand === brand);
-      if (myRanks.length) {
-        let miss = 0, drop = 0, okc = 0;
-        myRanks.forEach(e => {
-          const ds = Object.keys(e.days).sort().reverse();
-          const cur = e.days[ds[0]], prv = ds[1] != null ? e.days[ds[1]] : undefined;
-          if (cur == null) miss++;
-          else { okc++; if (prv != null && cur - prv >= 5) drop++; }
-        });
-        rank = miss > 0 ? { s: 'red', t: `미노출 ${miss}건 / ${myRanks.length}개 키워드` }
-          : drop > 0 ? { s: 'yellow', t: `순위 급락 ${drop}건` }
-          : { s: 'green', t: `${okc}개 키워드 정상 노출` };
-      }
-      // 목표 달성률(최근 7일 ROAS ÷ 목표 ROAS) + YOY(작년 동기 7일 실데이터 자동 비교)
-      let goal = null;
-      if (tg && +tg.target_roas > 0 && rec.cost > 1000) {
-        goal = { rate: Math.round(rRoas / +tg.target_roas * 100), target: +tg.target_roas };
-      }
-      const ly = lyBy[brand];
-      if (ly && ly.cost > 1000 && rec.cost > 1000) {
-        const lyRoas = ly.rev / ly.cost * 100;
-        goal = goal || { rate: null, target: null };
-        goal.yoyDiff = Math.round(rRoas - lyRoas);
-      }
-      rows.push({ brand, cost: yd.cost, rev: yd.rev, roas: roasOf(yd), perf, chat, review, rank, goal });
-    });
-    rows.sort((a, b) => b.cost - a.cost || a.brand.localeCompare(b.brand));
-
-    // ── 오늘 챙길 것 나머지 ──
-    recentPerf.forEach(p => {
-      let title = p.title || '성과 경고';
-      if (p.brand && title.startsWith(p.brand)) title = title.slice(p.brand.length).trim();
-      todos.push({ sev: 'high', brand: p.brand, title, desc: p.memo || '', tab: 'diagnosis' });
-    });
-    // 후기 저평점: 브랜드(매장) 단위로 묶어 1건씩만
-    const lowByBrand = {};
-    D.reviewsToday.forEach(c => {
-      if (!(+c.low_count > 0)) return;
-      const brand = storeBrand[c.store] || c.store;
-      if (!inB(brand)) return;
-      lowByBrand[brand] = (lowByBrand[brand] || 0) + (+c.low_count);
-    });
-    Object.entries(lowByBrand).forEach(([brand, low]) => {
-      todos.push({ sev: 'high', brand, title: `저평점 후기 ${low}건`, desc: '내용 확인 후 대응이 필요합니다', tab: 'reviews' });
-    });
-    // 순위 미노출·급락: 브랜드 단위로 묶기
-    const missByBrand = {}, dropByBrand = {};
-    Object.values(rankByProduct).forEach(e => {
-      if (!inB(e.brand)) return;
-      const ds = Object.keys(e.days).sort().reverse();
-      const cur = e.days[ds[0]], prv = ds[1] != null ? e.days[ds[1]] : undefined;
-      if (cur == null && ds[0] >= addDays(t, -1)) {
-        (missByBrand[e.brand] = missByBrand[e.brand] || []).push(e.keyword);
-      } else if (cur != null && prv != null && cur - prv >= 5) {
-        (dropByBrand[e.brand] = dropByBrand[e.brand] || []).push(`'${e.keyword}' ${prv}→${cur}위`);
-      }
-    });
-    Object.entries(missByBrand).forEach(([brand, kws]) => {
-      todos.push({ sev: 'high', brand, title: `순위 미노출 ${kws.length}건`, desc: kws.slice(0, 3).map(k => `'${k}'`).join(', ') + (kws.length > 3 ? ` 외 ${kws.length - 3}건` : ''), tab: 'rank' });
-    });
-    Object.entries(dropByBrand).forEach(([brand, ds2]) => {
-      todos.push({ sev: 'mid', brand, title: `순위 급락 ${ds2.length}건`, desc: ds2.slice(0, 2).join(', ') + (ds2.length > 2 ? ' 외' : ''), tab: 'rank' });
-    });
-    D.radar.filter(a => inB(a.brand)).forEach(a => {
-      todos.push({ sev: 'mid', brand: a.brand, title: `경쟁사 ${a.kind}`, desc: `[${a.keyword}] ${(a.title || '').slice(0, 24)} — ${a.detail || ''}` });
-    });
-    Object.entries(latestScore).forEach(([cn, s]) => {
-      if (allowedBrands && !allowedBrands.some(b => nMatch(b, cn))) return;
-      const silent = s.period_end ? Math.floor((new Date(t) - new Date(s.period_end)) / 86400000) : 0;
-      if (silent >= 14) todos.push({ sev: 'mid', brand: cn, title: `${silent}일째 대화 없음`, desc: '먼저 연락해 보세요', tab: 'chat' });
-    });
-    D.promises.filter(p => inB(p.brand)).forEach(p => {
-      todos.push({ sev: 'info', brand: p.brand || p.staff_name, title: '오늘 약속', desc: p.title || p.memo || '', tab: 'team' });
-    });
-    const sevOrder = { high: 0, mid: 1, info: 2 };
-    todos.sort((a, b) => sevOrder[a.sev] - sevOrder[b.sev]);
-
-    // ── 자동화 상태 ──
-    const hbOf = (n) => D.hb.find(h => h.name === n);
-    const hbJob = (name, sched) => {
-      const h = hbOf(name);
-      if (!h) return { name, sched, status: 'none', when: '', note: '오늘 밤부터 기록됩니다' };
-      const isToday = (h.ran_at || '').slice(0, 10) === t || new Date(h.ran_at).toDateString() === new Date().toDateString();
-      return { name, sched, status: h.ok === false ? 'fail' : isToday ? 'ok' : 'none', when: isToday ? hhmm(h.ran_at) : timeAgo(h.ran_at), note: h.note || '' };
-    };
-    const y1d = addDays(t, -1);
-    const dataJob = (name, sched, ok, when, note) => ({ name, sched, status: ok ? 'ok' : 'none', when: ok ? when : '', note });
-    const revCnt = D.reviewsToday.length;
-    const rankToday = D.rankHist.filter(h => (h.collected_at || '').slice(0, 10) === t).length;
-    const chatToday = D.chatUploads.filter(u => new Date(u.created_at).toDateString() === new Date().toDateString()).length;
-    const reportOk = D.ad.some(r => r.date === y1d);
-    const jobs = [
-      hbJob('레이더', '01:00'),
-      hbJob('정리백업', '02:20'),
-      hbJob('새벽준비', '02:53'),
-      dataJob('후기체크', '03:00', revCnt > 0, '', revCnt > 0 ? `오늘 ${revCnt}개 상품 점검` : '오늘 점검 기록 없음'),
-      dataJob('순위체크', '03:40', rankToday > 0, '', rankToday > 0 ? `오늘 ${rankToday}건 수집` : '오늘 수집 기록 없음'),
-      dataJob('보고서 수집·집계', '04시대', reportOk, '', reportOk ? '어제 데이터 반영 완료' : '어제 데이터 미반영'),
-      dataJob('대화 수집·분석', '새벽', chatToday > 0, '', chatToday > 0 ? `오늘 ${chatToday}개 방 수집` : '오늘 수집 기록 없음'),
-      // 업무보고 카톡 전송 — 실패하면 여기 불이 빨갛게 바뀝니다 (공지사항에는 올리지 않습니다)
-      hbJob('업무보고(2시간)', '10~22시'),
-    ];
-
-    return { rows, todos, jobs };
-  }, [D, allowedBrands, inB, t]);
+  // ── 맨 위 성과 카드 ──
+  const hero = useMemo(() => {
+    if (isPast) return pastEntry && pastEntry.data ? computeHero(pastEntry.data.ad, allowedBrands, asOfPast) : null;
+    return D ? computeHero(D.ad, allowedBrands, t) : null;
+  }, [isPast, pastEntry, D, allowedBrands, asOfPast, t]);
 
   if (loading || !computed) {
     return (
@@ -738,13 +669,49 @@ export default function Home({ currentUser, allowedBrands, setTab }) {
   }
 
   const staff = D.users.filter(u => u.role !== 'admin');
+  const board = isPast ? pastComputed : computed;
+  const pastWaiting = isPast && !pastEntry;                     // 불러오는 중
+  const pastBroken = isPast && !!pastEntry && !pastEntry.data;  // 불러오기 자체가 실패
+  const asOfLabel = asOfPast ? dayLabel(asOfPast) : '';
+  const range7 = asOfPast ? `${mdLabel(addDays(asOfPast, -7))}~${mdLabel(addDays(asOfPast, -1))} 7일` : '';
+  const pastNote = asOfPast
+    ? `· 신호에 마우스를 올리면 상세 사유가 표시됩니다 · 성과: 목표 기재 시 목표 ROAS 기준, 미기재 시 ${range7} vs 그 전 7일 · 목표 달성: ${range7} ROAS ÷ 목표 ROAS (목표는 과거 값이 남지 않아 지금 설정값으로 계산) · 대화: ${mdLabel(selDate)}까지의 최신 소통 점수 · 후기: ${mdLabel(asOfPast)} 점검 결과 · 순위: ${mdLabel(asOfPast)}까지 수집 결과`
+    : '';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <NoticeBoard currentUser={currentUser} isAdmin={isAdmin} />
-      <HeroHeader adData={D.ad} allowedBrands={allowedBrands} userName={currentUser?.name || ''} />
-      <TodoList items={computed.todos} setTab={setTab} />
-      <SignalBoard rows={computed.rows} />
+      <HeroHeader hero={hero} allowedBrands={allowedBrands} userName={currentUser?.name || ''}
+        cur={cur} yday={yday} isPast={isPast} onPick={pickDate} onReset={resetDate}
+        loading={pastWaiting} failed={isPast && pastEntry ? pastEntry.failed : null} onRetry={retryPast} />
+      {pastWaiting ? (
+        <div style={{ ...card, minHeight: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.txd, fontSize: 12.5 }}>
+          ⏳ {asOfLabel} 기준 챙길 것·신호등을 계산하는 중…
+        </div>
+      ) : (pastBroken || !board) ? (
+        <div style={{ ...card, display: 'flex', alignItems: 'center', gap: 10, color: C.no, fontSize: 12.5 }}>
+          지난 날짜 자료를 불러오지 못했습니다.
+          <button type="button" onClick={retryPast} style={{ background: C.no, border: 'none', borderRadius: 7, padding: '5px 12px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>다시 불러오기</button>
+        </div>
+      ) : isPast ? (
+        <>
+          <TodoList key={asOfPast} items={board.todos} setTab={setTab} title={`${asOfLabel} 챙길 것`} emptyText="✅ 이 날은 특이사항이 없었습니다." />
+          <SignalBoard rows={board.rows} dayWord={mdLabel(selDate)} goalRange={`${range7} (목표는 지금 설정값)`} note={pastNote}
+            emptyText={pastEntry.failed.includes('광고 성과') ? '광고 성과를 불러오지 못해 표시할 수 없습니다 — 맨 위 [다시 불러오기]를 눌러 주세요' : undefined} />
+        </>
+      ) : (
+        <>
+          <TodoList key="live" items={board.todos} setTab={setTab} />
+          <SignalBoard rows={board.rows} />
+        </>
+      )}
+      {isPast && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: C.txm, fontSize: 11 }}>
+          <span style={{ flex: 1, height: 1, background: C.bd }} />
+          여기부터는 지금(오늘) 기준
+          <span style={{ flex: 1, height: 1, background: C.bd }} />
+        </div>
+      )}
       <AutoStatus jobs={computed.jobs} />
       <TeamMini staff={staff} reports={D.reports} overdue={D.actions.filter(a => a.due_date && a.due_date < t && !a.done)} events={D.events} setTab={setTab} />
     </div>

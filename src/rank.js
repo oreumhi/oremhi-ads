@@ -61,12 +61,15 @@ export async function setRankOwner(id, ownerId, staffName) {
 
 // ─── 결과(수집 이력) ───
 // 최근 데이터 조회 (직원이면 본인 것만). 최신 순위 계산은 화면에서.
-export async function fetchRankHistory(ownerId, sinceISO) {
+// untilISO(선택): 이 시각 '이전' 수집분만 (홈 '지난 날짜 보기'용, 2026-09-28)
+//   넘기지 않으면 예전과 똑같이 동작합니다.
+export async function fetchRankHistory(ownerId, sinceISO, untilISO) {
   if (!sb) return [];
   let q = sb.from('rank_history').select('*')
     .order('collected_at', { ascending: false }).limit(3000);
   if (ownerId) q = q.eq('owner_id', ownerId);
   if (sinceISO) q = q.gte('collected_at', sinceISO);
+  if (untilISO) q = q.lt('collected_at', untilISO);
   const { data, error } = await q;
   if (error) { console.error('[rank_history] 조회:', error.message); return []; }
   return data || [];

@@ -113,10 +113,13 @@ export async function deleteChatUpload(id) {
 }
 
 // 점수 목록 (직원: 본인 것만 / 관리자: 전체)
-export async function fetchChatScores(ownerId) {
+// periodEndMax(선택): 대화 기간 끝이 이 날짜 이하인 점수만 (홈 '지난 날짜 보기'용, 2026-09-28)
+//   넘기지 않으면 예전과 똑같이 동작합니다.
+export async function fetchChatScores(ownerId, periodEndMax) {
   if (!sb) return [];
   let q = sb.from('chat_scores').select('*').order('period_end', { ascending: false }).limit(500);
   if (ownerId) q = q.eq('owner_id', ownerId);
+  if (periodEndMax) q = q.lte('period_end', periodEndMax);
   const { data, error } = await q;
   if (error) { console.error('[chat_scores] 조회:', error.message); return []; }
   return data || [];

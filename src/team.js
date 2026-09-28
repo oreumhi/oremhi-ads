@@ -209,6 +209,20 @@ export async function fetchOpenPerfAlerts() {
   return data || [];
 }
 
+// 기간 안의 성과 경고 전부 (상태 무관) — 홈 '지난 날짜 보기'용 (2026-09-28)
+//   지금은 '해결'된 경고도 그날엔 떠 있었을 수 있어 상태로 거르지 않고 가져온 뒤,
+//   화면 계산에서 '그날 열려 있었는지'를 따집니다(homeCompute.perfOpenOn).
+export async function fetchPerfAlertsRange(fromDate, toDate) {
+  if (!sb) return [];
+  const { data, error } = await sb.from('calendar_events')
+    .select('*').eq('etype', 'perf')
+    .gte('event_date', fromDate).lte('event_date', toDate)
+    .order('event_date', { ascending: false }).order('id', { ascending: true })
+    .limit(1000);
+  if (error) { console.error('[성과 경고] 기간 조회:', error.message); return []; }
+  return data || [];
+}
+
 // 오늘 약속 (아침 알림용)
 export async function fetchTodayPromises(dateStr) {
   if (!sb) return [];
