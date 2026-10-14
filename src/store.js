@@ -729,20 +729,26 @@ export async function syncStaffAssignments() {
   if (!sb) return { rank: 0, review: 0, chat: 0 };
   const norm = (s) => (s || '').toLowerCase().replace(/[\s_\-·xX×()]/g, '').replace(/숍/g, '솝');
   const { data: users } = await sb.from('users').select('id,name,role,assigned_brands');
+  // ※ 2026-10-14: 예시 계정 '김샘플'(id: sample_…, 담당 브랜드 모그라미)이 목록 앞쪽에 있어
+  //   모그라미 후기 매장·순위 상품·카톡방이 전부 예시 계정으로 넘어갔고, 실제 담당 김일교 화면에서
+  //   모그라미가 사라졌습니다. → ① 예시 계정(id가 sample_ 로 시작)은 실제 데이터 담당에서 제외
+  //   ② 같은 브랜드를 두 사람이 맡고 있으면, 지금 담당자가 후보 안에 있을 때는 바꾸지 않음(번갈아 뒤집히지 않게)
   const pairs = [];
-  (users || []).filter(u => u.role === 'staff').forEach(u => {
+  (users || []).filter(u => u.role === 'staff' && !String(u.id || '').startsWith('sample_')).forEach(u => {
     let bs = []; try { bs = JSON.parse(u.assigned_brands || '[]'); } catch { /* ignore */ }
     bs.forEach(b => pairs.push({ brand: b, id: u.id, name: u.name }));
   });
-  const findOwner = (label) => {
+  const findOwner = (label, curId) => {
     const nl = norm(label); if (!nl) return null;
-    return pairs.find(p => { const nb = norm(p.brand); return nb && (nl.includes(nb) || nb.includes(nl)); }) || null;
+    const hits = pairs.filter(p => { const nb = norm(p.brand); return nb && (nl.includes(nb) || nb.includes(nl)); });
+    if (!hits.length) return null;
+    return hits.find(h => h.id === curId) || hits[0];
   };
   let cr = 0, cv = 0, cc = 0;
   // 1) 순위 체크 대상
   const { data: rps } = await sb.from('rank_products').select('id,brand,owner_id');
   for (const it of (rps || [])) {
-    const o = findOwner(it.brand);
+    const o = findOwner(it.brand, it.owner_id);
     if (o && it.owner_id !== o.id) {
       await sb.from('rank_products').update({ owner_id: o.id, staff_name: o.name }).eq('id', it.id); cr++;
     }
@@ -756,7 +762,7 @@ export async function syncStaffAssignments() {
   const allStores = [...new Set((rp2 || []).map(r => r.store))];
   for (const s of allStores) {
     const cur = mapByStore[s];
-    const o = findOwner((cur && cur.brand) || s) || findOwner(s);
+    const o = findOwner((cur && cur.brand) || s, cur && cur.owner_id) || findOwner(s, cur && cur.owner_id);
     if (o && (!cur || cur.owner_id !== o.id)) {
       await sb.from('review_store_map').upsert(
         { store: s, owner_id: o.id, brand: (cur && cur.brand) || s, updated_at: new Date().toISOString() }, { onConflict: 'store' });
@@ -767,7 +773,7 @@ export async function syncStaffAssignments() {
   // 3) 대화 분석 카톡방
   const { data: rooms } = await sb.from('chat_room_owner').select('room_name,client_name,owner_id');
   for (const r of (rooms || [])) {
-    const o = findOwner(r.client_name) || findOwner(r.room_name);
+    const o = findOwner(r.client_name, r.owner_id) || findOwner(r.room_name, r.owner_id);
     if (o && r.owner_id !== o.id) {
       await sb.from('chat_room_owner').update({ owner_id: o.id, staff_name: o.name, updated_at: new Date().toISOString() }).eq('room_name', r.room_name);
       await sb.from('chat_uploads').update({ owner_id: o.id, uploader_name: o.name }).eq('room_name', r.room_name);
